@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+  <modelVersion>4.0.0</modelVersion>
+  <groupId>vn.uet</groupId>
+  <artifactId>online-auction</artifactId>
+  <version>0.1.0-SNAPSHOT</version>
+  <name>UET Online Auction - Project Scaffold</name>
+  <properties>
+    <!-- Java 17 là lựa chọn khởi đầu; cả nhóm thống nhất trước khi đổi. -->
+    <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+    <maven.compiler.release>17</maven.compiler.release>
+    <maven.compiler.source>17</maven.compiler.source>
+    <maven.compiler.target>17</maven.compiler.target>
+  </properties>
+  <!-- TV4, tuần6: tự thêm JavaFX, JUnit và cấu hình compiler phù hợp.
+       Tuần9: hoàn thiện Maven, Checkstyle, GitHub Actions.
+       Tuần10: cấu hình JaCoCo và kiểm tra coverage >=60%.
+       Chưa khai báo dependencies/plugins; chưa có ứng dụng hoặc test hoạt động. -->
+</project>
