@@ -2,7 +2,7 @@
 
 Dự án được dựng lại theo [kế hoạch tuần6–15](KE_HOACH_BTL_THEO_PDF.md) và PDF gốc trong thư mục.
 
-**Chưa có ứng dụng hoặc test chạy được.** File Java chỉ chứa ghi chú mục đích, người phụ trách và tuần thực hiện; không có package/class/interface/enum/field/constructor/method hay logic viết sẵn. FXML/CSS/cấu hình runtime chờ nhóm tự hoàn thiện. Chưa có kết quả kiểm thử hoặc coverage.
+**Nhánh nht6 có phần TV1 tuần 6:** User/Item hierarchy, Factory Method và kiểm tra console. Xem [bàn giao TV1](docs/tv1-week6-handover.md) để chạy. Có ví dụ JavaFX Label/Button riêng trong `examples/week6-tv1`. Các module khác, FXML và cấu hình Maven/JUnit/JavaFX chung vẫn là khung; chưa có ứng dụng đấu giá hoàn chỉnh hoặc coverage.
 
 ## Bắt đầu
 

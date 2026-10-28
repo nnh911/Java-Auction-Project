@@ -1,2 +1,54 @@
-%% TV1 + TV2, tuần 6. TODO: Nhóm tự vẽ class diagram User/Item/Auction/Bid.
-%% Chưa có sơ đồ hoàn chỉnh.
+%% TV1 week 6: User, Item, Factory. TV2 adds Auction/Bid later.
+classDiagram
+    class User {
+        <<abstract>>
+        -UUID id
+        -String username
+        +getId() UUID
+        +getUsername() String
+        +getRole() Role
+    }
+    User <|-- Bidder
+    User <|-- Seller
+    User <|-- Admin
+    class Role {
+        <<enumeration>>
+        BIDDER
+        SELLER
+        ADMIN
+    }
+    User ..> Role
+    class Item {
+        <<abstract>>
+        -UUID id
+        -UUID sellerId
+        -String name
+        -String description
+        +getId() UUID
+        +getSellerId() UUID
+        +getName() String
+        +getDescription() String
+        +getType() ItemType
+    }
+    Item <|-- Electronics
+    Item <|-- Art
+    Item <|-- Vehicle
+    Seller "1" --> "0..*" Item : owns via sellerId
+    class ItemType {
+        <<enumeration>>
+        ELECTRONICS
+        ART
+        VEHICLE
+    }
+    Item ..> ItemType
+    class ItemCreator {
+        <<abstract>>
+        +createItem(UUID id, UUID sellerId, String name, String description) Item
+    }
+    ItemCreator <|-- ElectronicsCreator
+    ItemCreator <|-- ArtCreator
+    ItemCreator <|-- VehicleCreator
+    ItemCreator ..> Item : returns
+    ElectronicsCreator ..> Electronics : creates
+    ArtCreator ..> Art : creates
+    VehicleCreator ..> Vehicle : creates
