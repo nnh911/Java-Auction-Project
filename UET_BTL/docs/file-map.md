@@ -1,6 +1,6 @@
 # Danh mục file khung và người phụ trách
 
-Trên nhánh `nht6`, 14 file TV1 trong `model/user`, `model/item`, `factory` đã triển khai tuần 6; `ItemFactoryTest` có kiểm tra console. Xem [bàn giao TV1](tv1-week6-handover.md). Các file còn lại là khung TODO. Các tuần là tuần học kỳ theo PDF; bảng bên dưới mô tả phân công dự kiến.
+Trên nhánh `nht6`, 14 file TV1 trong `model/user`, `model/item`, `factory` đã triển khai tuần 6; `ItemFactoryTest` có kiểm tra console. Xem lệnh chạy trong [README](../README.md#tv1-tuần-6). Các file còn lại là khung TODO. Các tuần là tuần học kỳ theo PDF; bảng bên dưới mô tả phân công dự kiến.
 
 | File | Chủ chính | Tuần | Nội dung nhóm tự viết |
 |---|---|---|---|

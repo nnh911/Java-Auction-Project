@@ -23,4 +23,4 @@ Dùng bảng yêu cầu tại mục15 trong [kế hoạch](../KE_HOACH_BTL_THEO_
 - Compile `examples/week6-tv1/HelloTv1.java` với JavaFX base/graphics/controls 17.0.16 có sẵn trong cache: đạt. Chưa mở cửa sổ, thử Button hoặc xác nhận FXML/SceneBuilder.
 - Chưa chạy trên runtime JDK 17 thật; chưa chạy Maven/JUnit, chưa đo coverage. Chưa kiểm tra CRUD hoặc quyền owner trong service tuần 7.
 
-Xem [bàn giao và lệnh chạy](tv1-week6-handover.md). Không đánh dấu toàn bộ Item CRUD/owner đã đạt dựa trên Factory/model.
+Xem [lệnh chạy trong README](../README.md#tv1-tuần-6). Không đánh dấu toàn bộ Item CRUD/owner đã đạt dựa trên Factory/model.

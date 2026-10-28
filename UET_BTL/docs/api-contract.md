@@ -38,7 +38,7 @@ Quy tắc đã code (giới hạn độ dài là lựa chọn triển khai cần
 - Chưa có active/password/hash hoặc Serializable trong model này. TV4/TV1 phối hợp thiết kế ở tuần tiếp theo; không truyền entity chứa hash qua DTO.
 - Admin constructor không thay thế kiểm tra quyền. Public register tuần 7 phải chặn tự cấp ADMIN theo đề xuất kế hoạch.
 
-Nguồn chạy và hướng dẫn bàn giao: [TV1 W6](tv1-week6-handover.md). Reviewer dự kiến TV2; chưa ghi nhận review thật.
+Lệnh chạy xem trong [README](../README.md#tv1-tuần-6). Reviewer dự kiến TV2; chưa ghi nhận review thật.
 
 ## Quyết định cần ghi lại
 
