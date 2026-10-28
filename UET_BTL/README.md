@@ -2,7 +2,7 @@
 
 Dự án được dựng lại theo [kế hoạch tuần6–15](KE_HOACH_BTL_THEO_PDF.md) và PDF gốc trong thư mục.
 
-**Chưa có ứng dụng hoặc test chạy được.** File Java chỉ chứa ghi chú mục đích, người phụ trách và tuần thực hiện; không có package/class/interface/enum/field/constructor/method hay logic viết sẵn. FXML/CSS/cấu hình runtime chờ nhóm tự hoàn thiện. Chưa có kết quả kiểm thử hoặc coverage.
+**Nhánh nht6 có phần TV1 tuần 6:** User/Item hierarchy, Factory Method và kiểm tra console. Xem cách chạy ở cuối README. Có ví dụ JavaFX Label/Button riêng trong `examples/week6-tv1`. Các module khác, FXML và cấu hình Maven/JUnit/JavaFX chung vẫn là khung; chưa có ứng dụng đấu giá hoàn chỉnh hoặc coverage.
 
 ## Bắt đầu
 
@@ -34,3 +34,33 @@ Dự án được dựng lại theo [kế hoạch tuần6–15](KE_HOACH_BTL_THE
 Chỉ dùng mvn test / mvn verify / chạy JavaFX sau khi nhóm đã hoàn thiện các phần tương ứng. Chưa có lệnh chạy server/client vì ServerMain và ClientApp chưa được viết.
 
 Không tạo sẵn module auto-bidding/anti-sniping/LineChart: nhóm quyết định phạm vi tùy chọn ở tuần13–14 theo PDF.
+
+## TV1 tuần 6
+
+14 file model/Factory và sơ đồ đã triển khai. API và validation được ghi tại [api-contract](docs/api-contract.md), chờ nhóm review. CRUD, login/register, Serialization và GUI Seller thuộc phần tiếp theo.
+
+Mở PowerShell tại `UET_BTL` để kiểm tra (thay đường dẫn JDK nếu cần):
+
+```powershell
+./scripts/test-week6-tv1.ps1 -JdkHome 'C:/Program Files/Java/jdk-26.0.2'
+```
+
+Kết quả mong đợi: `PASS: 57 checks`. Script biên dịch lại với `--release 17`, kiểm tra model/Factory trong thư mục tạm sạch. Đây là kiểm tra console, chưa tự chạy qua `mvn test`. Kết quả và giới hạn kiểm chứng ghi tại [testing-checklist](docs/testing-checklist.md).
+
+Ví dụ JavaFX độc lập (dùng các JAR Windows đã có trong cache máy Hoàng):
+
+```powershell
+$jdk = 'C:/Program Files/Java/jdk-26.0.2'
+$version = '17.0.16'
+$fxCache = Join-Path $env:USERPROFILE '.m2/repository/org/openjfx'
+$fxJars = @('base', 'graphics', 'controls') | ForEach-Object {
+    Join-Path $fxCache "javafx-$_/$version/javafx-$_-$version-win.jar"
+}
+$fxPath = $fxJars -join [System.IO.Path]::PathSeparator
+New-Item -ItemType Directory -Force target/tv1-hello | Out-Null
+& "$jdk/bin/javac.exe" -encoding UTF-8 --release 17 --module-path $fxPath --add-modules javafx.controls -d target/tv1-hello examples/week6-tv1/HelloTv1.java
+if ($LASTEXITCODE -ne 0) { throw 'JavaFX compilation failed' }
+& "$jdk/bin/java.exe" --module-path $fxPath --add-modules javafx.controls -cp target/tv1-hello vn.uet.auction.examples.HelloTv1
+```
+
+Cửa sổ hiện tên Hoàng; bấm Button để đổi Label. Máy khác cần chỉnh đường dẫn JDK/JavaFX tương ứng. Ví dụ này chưa thay thế phần FXML/SceneBuilder chung của TV4.

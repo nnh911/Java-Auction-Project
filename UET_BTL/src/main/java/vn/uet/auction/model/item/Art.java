@@ -1,6 +1,14 @@
-// FILE KHUNG — CHƯA TRIỂN KHAI.
-// Phụ trách: Thành viên 1. Tuần học kỳ: 6.
-// Package dự kiến: vn.uet.auction.model.item
-// Mục đích: Kế thừa Item cho sản phẩm nghệ thuật.
-// TODO: Nhóm tự viết package, khai báo kiểu, field, constructor và method.
-// Thống nhất hợp đồng trước khi code; xem KE_HOACH_BTL_THEO_PDF.md.
+package vn.uet.auction.model.item;
+
+import java.util.UUID;
+
+public final class Art extends Item {
+    public Art(UUID id, UUID sellerId, String name, String description) {
+        super(id, sellerId, name, description);
+    }
+
+    @Override
+    public ItemType getType() {
+        return ItemType.ART;
+    }
+}
