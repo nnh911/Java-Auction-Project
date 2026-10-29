@@ -1,0 +1,18 @@
+# Bỏ qua tất cả file đã biên dịch (.class)
+*.class
+
+# Bỏ qua thư mục target (chứa các file build của Maven)
+*.class
+target/
+**/target/
+UET_BTL/target/
+# Bỏ qua các thư mục / file cấu hình IDE (VS Code / Eclipse / IntelliJ)
+.settings/
+.classpath
+.project
+.vscode/
+.idea/
+*.iml
+
+# Bỏ qua file log
+*.log
