@@ -4,3 +4,13 @@
 // Mục đích: Nhóm tự khai báo interface DAO load/save và hợp đồng IOException.
 // TODO: Nhóm tự viết package, khai báo kiểu, field, constructor và method.
 // Thống nhất hợp đồng trước khi code; xem KE_HOACH_BTL_THEO_PDF.md.
+package vn.uet.auction.persistence;
+
+import java.io.IOException;
+
+public interface StateStore {
+
+    ApplicationState load() throws IOException;
+
+    void save(ApplicationState state) throws IOException;
+}
