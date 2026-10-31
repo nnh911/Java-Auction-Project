@@ -1,6 +1,0 @@
-<?xml version="1.0" encoding="UTF-8"?>
-<!--
-  FILE KHUNG: login. Phụ trách: Thành viên 4. Tuần 7–10.
-  TODO: Nhóm tự thiết kế layout bằng JavaFX/SceneBuilder, khai báo controller,
-  fx:id và event handler sau khi chốt hợp đồng. Chưa có root/layout để tải FXML.
--->
