@@ -46,6 +46,20 @@ public class Auction implements Serializable {
         this.currentPrice = startingPrice;
         this.status = AuctionStatus.OPEN;
     }
+    public Auction(Auction other) {
+        this(
+            Objects.requireNonNull(other, "other").id,
+            other.itemId,
+            other.sellerId,
+            other.startingPrice,
+            other.start,
+            other.end
+        );
+        
+        this.currentPrice = other.currentPrice;
+        this.status = other.status;
+        this.history.addAll(other.history);
+    }
 
     // ---------- getter (không có setter: đổi trạng thái qua method có kiểm tra) ----------
 
