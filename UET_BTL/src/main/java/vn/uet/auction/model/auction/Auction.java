@@ -88,10 +88,11 @@ public class Auction implements Serializable {
         return getHighestBid().map(Bid::getBidderId);
     }
 
-    // ---------- thay đổi trạng thái (package-private: chỉ AuctionService gọi) ----------
+    // ---------- thay đổi trạng thái (public để service ở package khác gọi) ----------
+    // Trong ứng dụng, AuctionService kiểm tra quyền và giữ lock trước khi gọi.
 
     /** Cập nhật OPEN/RUNNING/FINISHED theo giờ. Không đụng tới PAID/CANCELED. */
-    void refreshStatus(Instant now) {
+    public void refreshStatus(Instant now) {
         Objects.requireNonNull(now, "now");
         if (status != AuctionStatus.OPEN && status != AuctionStatus.RUNNING) {
             return;
@@ -105,7 +106,7 @@ public class Auction implements Serializable {
     }
 
     /** Ghi nhận bid. Service phải gọi refreshStatus(now) trước đó. */
-    void acceptBid(Bid bid) {
+    public void acceptBid(Bid bid) {
         Objects.requireNonNull(bid, "bid");
         if (status != AuctionStatus.RUNNING) {
             throw new IllegalStateException("Phiên không ở trạng thái RUNNING: " + status);
@@ -121,7 +122,7 @@ public class Auction implements Serializable {
     }
 
     /** FINISHED -> PAID. Việc kiểm tra "đúng winner" do service làm. */
-    void markPaid() {
+    public void markPaid() {
         if (status != AuctionStatus.FINISHED || history.isEmpty()) {
             throw new IllegalStateException("Chỉ thanh toán phiên FINISHED có người thắng");
         }
@@ -129,7 +130,7 @@ public class Auction implements Serializable {
     }
 
     /** OPEN/RUNNING/FINISHED -> CANCELED. PAID và CANCELED không hủy được. */
-    void cancel() {
+    public void cancel() {
         if (status == AuctionStatus.PAID || status == AuctionStatus.CANCELED) {
             throw new IllegalStateException("Không thể hủy phiên ở trạng thái " + status);
         }
