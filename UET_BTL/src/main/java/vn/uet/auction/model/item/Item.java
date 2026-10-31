@@ -1,9 +1,12 @@
 package vn.uet.auction.model.item;
 
+import java.io.Serializable;
 import java.util.Objects;
 import java.util.UUID;
 
-public abstract class Item {
+public abstract class Item implements Serializable {
+    private static final long serialVersionUID = 1L;
+
     private final UUID id;
     private final UUID sellerId;
     private final String name;
