@@ -1,18 +1,20 @@
-# Bỏ qua tất cả file đã biên dịch (.class)
-*.class
-
-# Bỏ qua thư mục target (chứa các file build của Maven)
-*.class
+# Build output (Maven tự sinh)
 target/
-**/target/
-UET_BTL/target/
-# Bỏ qua các thư mục / file cấu hình IDE (VS Code / Eclipse / IntelliJ)
-.settings/
-.classpath
-.project
-.vscode/
+
+# IDE
 .idea/
 *.iml
+.vscode/
+out/
 
-# Bỏ qua file log
+# Hệ điều hành
+Thumbs.db
+.DS_Store
+
+# Dữ liệu chạy thật, không commit
+UET_BTL/data/*
+!UET_BTL/data/.gitkeep
+
+# Log
 *.log
+
