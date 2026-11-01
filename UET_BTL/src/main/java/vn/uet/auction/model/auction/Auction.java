@@ -27,7 +27,7 @@ public class Auction implements Serializable {
 
     private BigDecimal currentPrice;
     private AuctionStatus status;
-    private final ArrayList<Bid> history = new ArrayList<>(); // ArrayList (không phải List) để Serializable rõ ràng
+    private final List<Bid> history = new ArrayList<>();
 
     public Auction(UUID id, UUID itemId, UUID sellerId,
                    BigDecimal startingPrice, Instant start, Instant end) {
@@ -45,6 +45,20 @@ public class Auction implements Serializable {
         }
         this.currentPrice = startingPrice;
         this.status = AuctionStatus.OPEN;
+    }
+    public Auction(Auction other) {
+        this(
+            Objects.requireNonNull(other, "other").id,
+            other.itemId,
+            other.sellerId,
+            other.startingPrice,
+            other.start,
+            other.end
+        );
+        
+        this.currentPrice = other.currentPrice;
+        this.status = other.status;
+        this.history.addAll(other.history);
     }
 
     // ---------- getter (không có setter: đổi trạng thái qua method có kiểm tra) ----------
@@ -74,9 +88,8 @@ public class Auction implements Serializable {
         return getHighestBid().map(Bid::getBidderId);
     }
 
-    // ---------- thay đổi trạng thái ----------
-    // public vì AuctionService nằm ở package khác; quy ước: CHỈ AuctionService gọi,
-    // và luôn gọi trong lock. Mỗi method vẫn tự kiểm tra invariant để chống gọi nhầm.
+    // ---------- thay đổi trạng thái (public để service ở package khác gọi) ----------
+    // Trong ứng dụng, AuctionService kiểm tra quyền và giữ lock trước khi gọi.
 
     /** Cập nhật OPEN/RUNNING/FINISHED theo giờ. Không đụng tới PAID/CANCELED. */
     public void refreshStatus(Instant now) {

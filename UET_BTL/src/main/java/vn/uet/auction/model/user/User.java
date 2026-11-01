@@ -1,9 +1,12 @@
 package vn.uet.auction.model.user;
 
+import java.io.Serializable;
 import java.util.Objects;
 import java.util.UUID;
 
-public abstract class User {
+public abstract class User implements Serializable {
+    private static final long serialVersionUID = 1L;
+
     private final UUID id;
     private final String username;
 

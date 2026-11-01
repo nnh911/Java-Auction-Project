@@ -1,20 +1,25 @@
-# Build output (Maven tự sinh)
+
+# Build output
+*.class
 target/
+**/target/
+out/
 
 # IDE
 .idea/
 *.iml
 .vscode/
-out/
+.settings/
+.classpath
+.project
 
-# Hệ điều hành
+# Operating system
 Thumbs.db
 .DS_Store
 
-# Dữ liệu chạy thật, không commit
+# Du lieu chay that, khong commit
 UET_BTL/data/*
 !UET_BTL/data/.gitkeep
 
 # Log
 *.log
-

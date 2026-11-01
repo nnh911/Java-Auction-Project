@@ -12,7 +12,7 @@ public class MemoryStateStore implements StateStore {
 
     @Override
     public ApplicationState load() throws IOException {
-        return state;
+        return new ApplicationState(state);
     }
 
     @Override
@@ -21,6 +21,6 @@ public class MemoryStateStore implements StateStore {
             throw new IllegalArgumentException("State must not be null");
         }
 
-        this.state = state;
+        this.state = new ApplicationState(state);
     }
 }

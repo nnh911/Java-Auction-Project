@@ -1,12 +1,14 @@
-# Nhật ký và đóng góp thực tế
+# Tiến độ thực tế sau ghép tuần 6
 
-Xem phân công tuần6–15 trong [kế hoạch](../KE_HOACH_BTL_THEO_PDF.md). File khung không phải đóng góp triển khai của thành viên.
+Cập nhật 2026-10-31. Nguồn: code trên tuần-6-chung và kết quả được báo trong phiên làm việc. Không thay cho xác nhận đóng góp cá nhân/review của từng người.
 
-| Tuần | Thành viên | Việc đã tự code | PR/commit | Test và kết quả | Reviewer | Vướng mắc |
-|---|---|---|---|---|---|---|
-| 6 | TV1 — Nguyễn Nam Hoàng | Codex triển khai theo yêu cầu: User/Item/Factory (14 file), kiểm tra console, sơ đồ, hợp đồng và ví dụ JavaFX. Hoàng cần đọc/chạy lại để nắm code | Nhánh nht6, chưa commit/PR | 57 kiểm tra đạt; toàn bộ src/main và ví dụ JavaFX compile với --release 17 trên JDK 26.0.2 (2026-10-28) | TV2 — chưa review | Chờ duyệt API; chưa chạy cửa sổ JavaFX, FXML chung, Maven/JUnit và JDK 17 thật |
-| TODO | TV2 | Chưa bắt đầu | Chưa có | Chưa chạy | TV3 | TODO |
-| TODO | TV3 | Chưa bắt đầu | Chưa có | Chưa chạy | TV4 | TODO |
-| TODO | TV4 | Chưa bắt đầu | Chưa có | Chưa chạy | TV1 | TODO |
+| Người | Có trong code chung | Còn lại / bằng chứng |
+|---|---|---|
+| TV1 — Nguyễn Nam Hoàng | User/Item/Factory, Serializable, ItemFactoryTest console | 57 checks từng chạy đạt; JavaFX tự chạy được theo người dùng. Cần review/API, chạy lại khi code đổi |
+| TV2 — Nguyễn Kiên Cường | Auction/Bid/status, Manager Singleton, Service Clock/lock/map, snapshot, AuctionTest/AuctionServiceTest | Chưa thấy test Singleton; placeBid là stub tuần 7; chốt State và quyền; JavaFX chưa có bằng chứng |
+| TV3 — Lê Hải Thịnh | Protocol, DTO, ProtocolContractTest | Ảnh máy Thịnh cho thấy fake login 1 test đạt, nhưng FakeGatewayTest chưa có trong nhánh chung lúc cập nhật; thiếu mapping/tài liệu xác nhận và luồng thử đầy đủ |
+| TV4 — Nguyễn Hoàng Minh Tuấn | StateStore, ApplicationState, MemoryStateStore copy, PasswordHasher và 3 test, Maven | StateStoreContractTest còn khung; thiếu JavaFX/FXML và xác nhận môi trường các máy |
 
-Repo hiện có main và nhánh nht6 do Hoàng tạo. Chưa tạo commit, push hoặc PR cho phần triển khai TV1 này. Các thành viên khác tự cập nhật kết quả thực tế của mình.
+Người dùng báo BUILD SUCCESS sau sửa quyền truy cập Auction. Commit merge không chứng minh mọi nghiệp vụ đã chạy; xem [checklist](testing-checklist.md). Chưa ghi nhận review chéo chính thức. Nhóm bắt đầu tuần 7 và hoàn thiện các mục tồn tại trong [bàn giao](week6-handoff.md).
+
+AI đã hỗ trợ TV1 và sửa visibility Auction trong phiên làm việc; từng thành viên cần đọc và giải thích code mình bàn giao. Không tự chuyển bảng phân công thành bằng chứng tác giả.

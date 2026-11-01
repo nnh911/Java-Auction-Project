@@ -1,26 +1,30 @@
-# Checklist kiểm thử
+# Kiểm thử sau ghép tuần 6
 
-TV4 điều phối; từng người phụ trách test module mình. TV1 có kiểm tra console tại ItemFactoryTest.java, chạy bằng scripts/test-week6-tv1.ps1; chưa có JUnit/test runner Maven chung hoặc coverage. Các test khác vẫn là khung.
+Cập nhật 2026-10-31. Chỉ ghi đạt theo phạm vi thực sự được chạy.
 
-| Nhóm kịch bản | Owner | Tuần | Bằng chứng cần điền | Trạng thái |
-|---|---|---|---|---|
-| User/role/login/register | TV1 | 8–12 | TODO: test và kết quả thực tế | Chưa viết |
-| Item CRUD/Factory/owner | TV1 | 6–12 | TODO | Chưa viết |
-| Auction/bid/vòng đời/winner | TV2 | 7–12 | TODO | Chưa viết |
-| Concurrency/biên thời gian | TV2, TV4 hỗ trợ | 7–14 | TODO | Chưa viết |
-| Protocol/Socket/realtime | TV3 | 8–12 | TODO | Chưa viết |
-| Serialization/file hỏng/lỗi ghi/restart | TV4 | 9–12 | TODO | Chưa viết |
-| Password hashing | TV4 | 7–12 | TODO | Chưa viết |
-| E2E GUI↔Logic↔Network↔Data | Cả nhóm, TV3 chủ trì | 11–14 | TODO | Chưa viết |
-| Checkstyle/JUnit/coverage≥60%/CI | TV4, từng chủ module | 9–14 | TODO: report và URL Actions | Chưa cấu hình hoàn chỉnh |
+| Bộ kiểm tra | Trạng thái / phạm vi |
+|---|---|
+| Maven build/test chung | Người dùng báo BUILD SUCCESS sau sửa visibility Auction; báo cáo trong target có AuctionTest 13, AuctionServiceTest 13, PasswordHasherTest 3 không lỗi. Không dùng tổng này thay số test đầy đủ (protocol có nested tests) |
+| ProtocolContractTest | Trước đó đã chạy 43 test đạt; cần chạy lại cùng revision mới bằng clean test |
+| ItemFactoryTest | Console main, trước đó PASS: 57 checks; không tự chạy bằng JUnit/Maven |
+| FakeGatewayTest | Ảnh máy Thịnh: 1 test login giả đạt; file chưa có trong nhánh chung lúc cập nhật |
+| StateStoreContractTest | File khung; chưa có test memory store |
+| Singleton identity | Chưa thấy test |
+| Tích hợp bốn module | Chưa có test chạy chung model → service → DTO → memory store |
+| JavaFX | Hoàng báo chạy Label/Button thành công; chưa xác nhận cả bốn máy, FXML/SceneBuilder |
+| Socket/file thật/concurrency/CI/coverage | Chưa nghiệm thu; làm theo mốc kế hoạch |
 
-Dùng bảng yêu cầu tại mục15 trong [kế hoạch](../KE_HOACH_BTL_THEO_PDF.md). Chỉ cập nhật đạt sau khi tự chạy và có assertion/bằng chứng.
+## Cách chạy
 
-## Kết quả riêng TV1 tuần 6 — 2026-10-28
+Trong thư mục UET_BTL: mvn clean test. Trong IntelliJ Maven nhập goal clean test.
+Chạy riêng main vn.uet.auction.item.ItemFactoryTest sau biên dịch test, cần PASS: 57 checks.
+Không dùng scripts/test-week6-tv1.ps1 vì script không có trong bản hiện tại.
 
-- `./scripts/test-week6-tv1.ps1 -JdkHome 'C:/Program Files/Java/jdk-26.0.2'`: **PASS: 57 checks**, exit code 0. Bao gồm subtype/role, giữ ID/chủ, trim, null, tên trắng, độ dài sai và biên hợp lệ.
-- Compile toàn bộ file Java trong `src/main/java` với `javac -encoding UTF-8 --release 17`: đạt. Các module khác hiện chỉ là comment, kết quả này không chứng minh chúng đã hoạt động.
-- Compile `examples/week6-tv1/HelloTv1.java` với JavaFX base/graphics/controls 17.0.16 có sẵn trong cache: đạt. Chưa mở cửa sổ, thử Button hoặc xác nhận FXML/SceneBuilder.
-- Chưa chạy trên runtime JDK 17 thật; chưa chạy Maven/JUnit, chưa đo coverage. Chưa kiểm tra CRUD hoặc quyền owner trong service tuần 7.
+## Test cần bổ sung
 
-Xem [lệnh chạy trong README](../README.md#tv1-tuần-6). Không đánh dấu toàn bộ Item CRUD/owner đã đạt dựa trên Factory/model.
+- Memory store: round-trip users/items/auctions/bids; sửa State gốc sau save không ảnh hưởng store; sửa State tải ra và Auction bên trong không ảnh hưởng lần load tiếp; hai store độc lập; null save bị từ chối.
+- Singleton: assertSame hai lần getInstance, không dùng Singleton để chia sẻ dữ liệu giữa test nghiệp vụ.
+- Tích hợp: tạo Seller/Item qua Factory, đưa vào State, tạo AuctionService(Clock cố định, lock chung, state.getAuctions()), tạo phiên, map snapshot sang AuctionDetail/Response, save/load và đối chiếu ID/giá/thời gian/trạng thái.
+- Chưa kiểm tra bid thật xuyên service ở tuần 6 vì placeBid vẫn ném UnsupportedOperationException.
+
+Lưu số test, JDK, revision và lỗi thực tế khi chạy. release 17 chỉ là target biên dịch; cấu hình JUnit 6 cần xác nhận runtime phù hợp. Không ghi JDK 17/cả bốn máy đã đạt nếu chưa chạy.
