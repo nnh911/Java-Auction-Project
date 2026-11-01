@@ -2,6 +2,8 @@
 
 Cập nhật 2026-10-31 từ code nhánh tuần-6-chung (revision trước cập nhật tài liệu: 148da45). Đây là hợp đồng triển khai hiện tại để các thành viên/AI tiếp tục, không tuyên bố cả bốn người đã review hay mọi quy tắc nghiệp vụ đã được duyệt.
 
+Phần bổ sung TV1 tuần 7 ở cuối tài liệu thay thế các ghi chú "chưa có service/hash/active" đối với nhánh này.
+
 Đọc [bàn giao tuần 6](week6-handoff.md) trước khi triển khai tuần 7. Khi đổi chữ ký, cập nhật caller, test và tài liệu trong cùng thay đổi.
 
 ## Kiểu chung và trách nhiệm
@@ -104,3 +106,25 @@ verify(String password,String stored): boolean; sai mật khẩu/hash sai địn
 Đề xuất kế hoạch: không cho public register ADMIN; không tự bid; winner xác nhận thanh toán mô phỏng; owner/Admin hủy phiên chưa PAID; chặn sửa/xóa Item đã có phiên. Chưa coi là đã triển khai hoặc đã cả nhóm xác nhận.
 
 Nhóm cần ghi quyết định thật cho actor/role/active, password storage, đấu giá lại, giới hạn tiền, wiring State/lock, bids map/history, command payload/result/error mapping và save failure. Không suy ra các quyết định này chỉ từ tên API.
+
+
+## Bổ sung TV1 tuần 7 (nhánh nnhoangt7)
+
+Đây là quyết định triển khai để review, chưa phải xác nhận cả nhóm đã duyệt. Giữ nguyên constructor User/Item, Factory, DTO và PasswordHasher tuần 6.
+
+- `ApplicationState.getAccounts(): Map<UUID,AccountState>` lưu theo userId. `AccountState(passwordHash,active)` bất biến, Serializable, toString che hash. Copy constructor State sao chép cả map này; MemoryStateStore giữ được credentials/active. Không lưu password thô. Không trả AccountState qua protocol.
+- `UserService(ApplicationState, ReentrantLock, PasswordHasher)` và `ItemService(ApplicationState, ReentrantLock)` phải nhận **cùng State và cùng lock** với AuctionService. Không tự nối vào Singleton AuctionManager hiện có.
+- `register(String username,String password,Role): UserSummary`: chỉ BIDDER/SELLER; username theo model tuần 6 (strip, phân biệt hoa/thường, duy nhất); password không null/trắng, không strip trước hash.
+- `bootstrapAdmin(String,String): UserSummary`: chỉ dành cho startup tin cậy, chỉ chạy được khi chưa có Admin. TV3 không được expose thành command public. Không có password mặc định.
+- `login(String,String): UserSummary`: tên được strip; kiểm tra password và active. `listUsers(UUID actorId): List<UserSummary>` chỉ Admin đang active. DTO giữ nguyên schema, không thêm hash/active.
+- `setUserActive(UUID actorId,UUID userId,boolean): void`: Admin active; không khóa Admin active cuối cùng; user không tồn tại ném IllegalArgumentException.
+- `requireActive(UUID): UserSummary`, `requireRole(UUID,Role): UserSummary`: helper cho TV2/TV3, tra lại State, không tin role từ client. Actor ID phải lấy từ session server.
+- `createItem(UUID actorId,ItemType,String name,String description): UUID`: Seller active, Factory tuần 6.
+- `listItems(UUID actorId): List<ItemSummary>` và `getItem(UUID actorId,UUID itemId): Optional<ItemDetail>`: mọi account active được xem; không thấy trả Optional.empty; list không sửa được.
+- `updateItem(UUID actorId,UUID itemId,ItemType,String,String): void`, `deleteItem(UUID actorId,UUID itemId): void`: chỉ Seller sở hữu; chặn khi có **bất kỳ** phiên gắn Item, kể cả CANCELED, để giữ lịch sử. Update tạo Item bất biến thay thế, giữ ID/owner; validation lỗi không thay dữ liệu.
+- `requireOwnedItem(UUID actorId,UUID itemId): ItemDetail`: TV2 gọi trong khi giữ lock chung xuyên suốt bước kiểm tra và thêm phiên; gọi helper rồi nhả lock trước khi tạo phiên không bảo đảm tránh race với delete/khóa tài khoản.
+- Lỗi tuần 7: SecurityException cho xác thực/quyền/active; IllegalStateException cho trùng tên, Admin đã khởi tạo, khóa Admin cuối, Item có phiên; IllegalArgumentException cho dữ liệu sai/đối tượng mutation không thấy; null bắt buộc theo model/Objects.requireNonNull. Custom exception và mapping protocol thuộc tuần 8/TV3, chưa thực hiện.
+- Account cũ chỉ có User mà thiếu AccountState bị từ chối xác thực, không tự gán password/active. Fixture cần đăng ký qua service hoặc seed cả hai map dưới lock.
+- Mọi truy cập trực tiếp maps State ở nơi tích hợp đều phải giữ lock chung. Chưa có lưu file, session mạng, handler command hoặc transaction save; không coi nhánh này là đã tích hợp production.
+
+Form Seller tuần 7 dùng `SellerController.Gateway` với dữ liệu giả qua `SellerPrototype`, chưa nối backend/mạng. `ClientApp` của TV4 giữ nguyên. Hai dependency JavaFX controls/fxml 17.0.16 trong pom chỉ để compile/chạy prototype.
