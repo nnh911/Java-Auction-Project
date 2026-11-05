@@ -30,7 +30,8 @@ public record Request(
 
     public sealed interface Payload extends Serializable
             permits LoginPayload, CreateItemPayload,
-            CreateAuctionPayload, PlaceBidPayload {
+            CreateAuctionPayload, PlaceBidPayload, RegisterPayload, EmptyPayload,
+            ItemIdPayload, UpdateItemPayload, SetUserActivePayload {
     }
 
     public record LoginPayload(
@@ -86,5 +87,26 @@ public record Request(
             Objects.requireNonNull(auctionId, "auctionId");
             Objects.requireNonNull(amount, "amount");
         }
+    }
+
+    public record EmptyPayload() implements Payload { }
+    public record RegisterPayload(String username, String password,
+            vn.uet.auction.model.user.Role role) implements Payload {
+        public RegisterPayload {
+            Objects.requireNonNull(username); Objects.requireNonNull(password); Objects.requireNonNull(role);
+        }
+        @Override public String toString() { return "RegisterPayload[credentials=REDACTED]"; }
+    }
+    public record ItemIdPayload(UUID itemId) implements Payload {
+        public ItemIdPayload { Objects.requireNonNull(itemId); }
+    }
+    public record UpdateItemPayload(UUID itemId, ItemType type, String name, String description) implements Payload {
+        public UpdateItemPayload {
+            Objects.requireNonNull(itemId); Objects.requireNonNull(type);
+            Objects.requireNonNull(name); Objects.requireNonNull(description);
+        }
+    }
+    public record SetUserActivePayload(UUID userId, boolean active) implements Payload {
+        public SetUserActivePayload { Objects.requireNonNull(userId); }
     }
 }
