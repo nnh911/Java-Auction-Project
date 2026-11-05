@@ -123,6 +123,45 @@ class AuctionLifecycleTest {
     }
 
     @Test
+    void returnedSnapshotStaysAtCommitEvenWhenListenerPlacesAnotherBid() {
+        clock.set(start);
+        service.addListener(event -> {
+            if (event.type() == AuctionEvent.Type.BID_ACCEPTED && event.snapshot().bidCount() == 1) {
+                service.placeBid(id, bidder, BigDecimal.valueOf(20));
+            }
+        });
+        var firstCommit = service.placeBid(id, bidder, BigDecimal.TEN);
+        assertEquals(BigDecimal.TEN, firstCommit.currentPrice());
+        assertEquals(1, firstCommit.bidCount());
+        var latest = service.getAuction(id).orElseThrow();
+        assertEquals(BigDecimal.valueOf(20), latest.currentPrice());
+        assertEquals(2, latest.bidCount());
+        assertEquals(BigDecimal.TEN, events.get(1).snapshot().currentPrice());
+    }
+
+    @Test
+    void externallyHeldLockIsRejectedBeforeMutationOrCallbacks() {
+        clock.set(start);
+        lock.lock();
+        try {
+            assertThrows(IllegalStateException.class,
+                    () -> service.placeBid(id, bidder, BigDecimal.TEN));
+            assertThrows(IllegalStateException.class, service::closeDueAuctions);
+            assertThrows(IllegalStateException.class, () -> service.cancelAuction(seller, id));
+            assertThrows(IllegalStateException.class, () -> service.confirmPayment(bidder, id));
+            assertThrows(IllegalStateException.class, () -> service.getAuction(id));
+            assertEquals(1, lock.getHoldCount(), "Service must not release caller's lock");
+            assertTrue(events.isEmpty());
+        } finally {
+            lock.unlock();
+        }
+        var untouched = service.getAuction(id).orElseThrow();
+        assertEquals(AuctionStatus.OPEN, untouched.status());
+        assertEquals(0, untouched.bidCount());
+        assertEquals(1, service.placeBid(id, bidder, BigDecimal.TEN).bidCount());
+    }
+
+    @Test
     void nullAndMissingIdentifiersAreRejected() {
         assertThrows(NullPointerException.class, () -> service.addListener(null));
         assertThrows(NullPointerException.class, () -> service.removeListener(null));

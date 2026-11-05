@@ -10,14 +10,14 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.UUID;
-import java.util.concurrent.locks.ReentrantLock;
 import java.util.concurrent.CopyOnWriteArrayList;
-import vn.uet.auction.observer.AuctionEvent;
-import vn.uet.auction.observer.AuctionListener;
+import java.util.concurrent.locks.ReentrantLock;
 import java.util.function.Supplier;
 import vn.uet.auction.model.auction.Auction;
 import vn.uet.auction.model.auction.AuctionStatus;
 import vn.uet.auction.model.auction.Bid;
+import vn.uet.auction.observer.AuctionEvent;
+import vn.uet.auction.observer.AuctionListener;
 
 /**
  * Logic nghiệp vụ đấu giá. Đây là NƠI DUY NHẤT được sửa đối tượng Auction.
@@ -59,8 +59,9 @@ public class AuctionService {
      * Tạo phiên mới. Trạng thái ban đầu là OPEN, hoặc RUNNING nếu start đã qua.
      * Ném IllegalArgumentException khi dữ liệu sai, IllegalStateException khi Item đã có phiên
      * (tuần 8 sẽ đổi sang exception nghiệp vụ của nhóm).
-     * TODO tuần 7: kiểm tra seller đúng role và sở hữu Item qua service của TV1 (gọi trước khi
-     * lấy lock hoặc dùng lock chung để tránh deadlock).
+     * Tích hợp TV1: requireOwnedItem phải chạy bên trong lock này, xuyên suốt tới khi thêm phiên.
+     * Kiểm tra trước khi lấy lock có thể bị vô hiệu bởi sửa/xóa Item hoặc khóa tài khoản.
+     * Checkout hiện chưa có implementation UserService/ItemService tuần 7.
      */
     public AuctionSnapshot createAuction(UUID sellerId, UUID itemId, BigDecimal startingPrice,
                                          Instant start, Instant end) {
@@ -120,7 +121,8 @@ public class AuctionService {
 
     /**
      * Lõi đặt giá tuần 7: đọc giờ, kiểm tra và cập nhật trong cùng lock.
-     * Caller phải xác thực bidder/role/active trước khi gọi; API TV1 chưa có.
+     * Actor phải lấy từ session tin cậy. Kiểm tra role/active còn chờ ghép API TV1 trong lock;
+     * kiểm tra riêng ở dispatcher trước khi gọi không đủ để chống thay đổi active đồng thời.
      * Event phát sau unlock, kể cả chuyển trạng thái trước khi bid bị từ chối.
      * Lỗi tạm thời: null -> NPE, không tìm thấy/giá sai/tự bid -> IAE,
      * phiên không RUNNING -> ISE. Custom exceptions thuộc tuần 8.
@@ -216,6 +218,12 @@ public class AuctionService {
     }
 
     private <T> T inLock(Supplier<T> body) {
+        // Reentrant acquisition would release only our hold, leaving the caller's hold active
+        // during callbacks. Fail before any business mutation instead.
+        if (lock.isHeldByCurrentThread()) {
+            throw new IllegalStateException(
+                    "Không gọi AuctionService khi caller đang giữ lock chung");
+        }
         List<AuctionEvent> events;
         lock.lock();
         try {

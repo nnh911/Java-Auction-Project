@@ -1,10 +1,5 @@
 # Hợp đồng API — baseline sau tuần 6
 
-> **Cập nhật 2026-11-05:** [Hợp đồng TV2 tuần 7 để gửi nhóm](tv2-week7-contract.md)
-> chốt các chữ ký User/Item lookup, gateway, callback/error, controller và giao tiếp
-> đấu giá theo yêu cầu người dùng. Xem trạng thái triển khai trong từng mục;
-> chưa ghi nhận cả bốn thành viên review. JavaFX đã được thêm vào pom theo yêu cầu.
-> Các đoạn bàn giao trước bên dưới giữ làm lịch sử, không phải trạng thái mới nhất.
 
 Cập nhật 2026-10-31 từ code nhánh tuần-6-chung (revision trước cập nhật tài liệu: 148da45). Đây là hợp đồng triển khai hiện tại để các thành viên/AI tiếp tục, không tuyên bố cả bốn người đã review hay mọi quy tắc nghiệp vụ đã được duyệt.
 
