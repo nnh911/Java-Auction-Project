@@ -158,3 +158,82 @@ ClientState là nền dữ liệu prototype, chưa phải màn hình JavaFX hoà
 | TV2 | Branch/commit AuctionService, AuctionListener, AuctionEvent; kiểu actor pay/cancel; callback/event; exception; xác nhận placeBid snapshot | Mapper giữ nguyên start/end→startTime/endTime, placedAt→acceptedAt; đề xuất PLACE_BID trả AuctionDetail; không gọi model mutation trực tiếp |
 | TV4 | Branch/commit pom JavaFX, ClientApp; cách chạy và version JDK thực tế; wiring State/lock chung với TV2 | Main/mapper/state biên dịch release 17; không sửa pom; hai smoke test console chưa thuộc Surefire |
 | Cả nhóm | Duyệt payload cho command thiếu, Ack/list wrapper, dispatcher/session; thống nhất mốc prototype chi tiết | Dispatcher in-memory thuộc W7 theo kế hoạch; Socket thuộc giai đoạn sau; các API mới TV3 là đã triển khai, chưa coi là nhóm duyệt |
+
+## TV3 tuần 7 — dispatcher User/Item (2026-11-05)
+
+Phương án payload/kết quả/mapping được người dùng xác nhận đã duyệt trong chat.
+**Đã triển khai**, chưa ghi nhận review chéo của TV1/TV4. Không coi xác nhận chat
+là bằng chứng tất cả thành viên đã review code.
+
+### Tích hợp bàn giao
+
+Lấy nguyên UserService, ItemService, AccountState và ApplicationState từ local ref
+origin/nnhoangt7 @ 3de0ab531439bf6cc8128c3da0868f31b47c637b.
+UserService đã so sánh khớp nội dung file đính kèm. Đây là tích hợp code TV1,
+không nhận là code nghiệp vụ TV3. ApplicationState thuộc TV4 có bổ sung accounts;
+cần TV4 giữ map này và copy constructor khi ghép. Không thay đổi nghiệp vụ TV1.
+
+### API và sử dụng
+
+- `CommandDispatcher(UserService users, ItemService items, ReentrantLock lock)`;
+  `Response<? extends Serializable> dispatch(Session session, Request request)`.
+- Phải dùng cùng State/lock khi khởi tạo mọi service và dispatcher. Một Session
+  cho một client, gọi tuần tự; Session không thread-safe. Dispatcher chưa có Socket.
+- Session: constructor public không tham số; `boolean isAuthenticated()`,
+  `UUID userId()`, `Role role()`, `void bind(UserSummary user)`, `void clear()`.
+  userId/role ném IllegalStateException khi chưa login. bind chỉ dành cho code tin cậy.
+- Request bổ sung nested payload: `EmptyPayload()`,
+  `RegisterPayload(String username, String password, Role role)`,
+  `ItemIdPayload(UUID itemId)`,
+  `UpdateItemPayload(UUID itemId, ItemType type, String name, String description)`,
+  `SetUserActivePayload(UUID userId, boolean active)`.
+  Field tham chiếu non-null; constructor ném NPE trước dispatch nếu thiếu field.
+  RegisterPayload.toString che credentials. Không có actor trong payload.
+- `Ack()` implements Serializable; `ListResult<T extends Serializable>(List<T> values)`
+  implements Serializable, accessor values(), copy list bất biến; null bị từ chối.
+
+| Command | Payload | Response data |
+|---|---|---|
+| REGISTER | RegisterPayload | UserSummary |
+| LOGIN | LoginPayload | UserSummary |
+| LIST_USERS | EmptyPayload | ListResult<UserSummary> |
+| SET_USER_ACTIVE | SetUserActivePayload | Ack |
+| CREATE_ITEM | CreateItemPayload | UUID |
+| LIST_ITEMS | EmptyPayload | ListResult<ItemSummary> |
+| GET_ITEM | ItemIdPayload | ItemDetail |
+| UPDATE_ITEM | UpdateItemPayload | Ack |
+| DELETE_ITEM | ItemIdPayload | Ack |
+
+```java
+ApplicationState state = new ApplicationState();
+ReentrantLock lock = new ReentrantLock();
+UserService users = new UserService(state, lock, new PasswordHasher());
+ItemService items = new ItemService(state, lock);
+CommandDispatcher dispatcher = new CommandDispatcher(users, items, lock);
+Session session = new Session();
+var response = dispatcher.dispatch(session, new Request(UUID.randomUUID(),
+        Command.LOGIN, new Request.LoginPayload("seller_demo", "password")));
+```
+
+Response giữ nguyên requestId. Login hợp lệ về payload xóa session cũ trước xác thực;
+login thất bại không giữ danh tính cũ. REGISTER không tự login. Mọi command sau login
+kiểm tra lại active, không tin role cache trong session. bootstrapAdmin không expose.
+Payload sai → INVALID_REQUEST; chưa login → UNAUTHENTICATED; sai login →
+AUTHENTICATION_FAILED; sai quyền/khóa → FORBIDDEN; get/mutation không tồn tại →
+NOT_FOUND; IllegalStateException nghiệp vụ → CONFLICT; dữ liệu sai → INVALID_REQUEST;
+lỗi RuntimeException khác → INTERNAL_ERROR. Response lỗi chỉ gửi tên mã, không gửi
+exception/password/hash. Null Request/Session là lỗi caller, ném NPE vì không có
+requestId hợp lệ để trả response. Kiểm tra tồn tại và mutation giữ cùng lock chung.
+Auction commands chưa triển khai: sau kiểm tra đăng nhập/active trả UNSUPPORTED_COMMAND.
+Không suy đoán Observer hoặc quyền Auction từ API tuần 6.
+
+### Kiểm chứng
+
+Đã biên dịch toàn bộ main + ba smoke test bằng javac --release 17;
+DispatcherSmokeTest, ProtocolMapperSmokeTest, ClientStateSmokeTest đều PASS.
+DispatcherSmokeTest cũng là console client dùng command với service thật:
+register/login/CRUD/admin active, sai password, cấm register Admin, trùng username,
+payload sai, chưa login, sai chủ, not found và session account bị khóa.
+Chưa chạy Maven/JUnit, GUI, Socket, Auction/Observer; các smoke test dùng main(),
+không tự chạy trong Surefire. Cần TV1 review quyền/error mapping; TV4 review State;
+TV2 bàn giao Auction/event trước khi hoàn tất toàn bộ kịch bản W7.
