@@ -1,9 +1,3 @@
-// FILE KHUNG — CHƯA TRIỂN KHAI.
-// Phụ trách: Thành viên 3. Tuần học kỳ: 6–10.
-// Package dự kiến: vn.uet.auction.protocol
-// Mục đích: DTO request: nhóm thống nhất requestId, command và payload.
-// TODO: Nhóm tự viết package, khai báo kiểu, field, constructor và method.
-// Thống nhất hợp đồng trước khi code; xem KE_HOACH_BTL_THEO_PDF.md.
 package vn.uet.auction.protocol;
 
 import java.io.Serializable;
@@ -31,7 +25,7 @@ public record Request(
     public sealed interface Payload extends Serializable
             permits LoginPayload, CreateItemPayload,
             CreateAuctionPayload, PlaceBidPayload, RegisterPayload, EmptyPayload,
-            ItemIdPayload, UpdateItemPayload, SetUserActivePayload {
+            ItemIdPayload, UpdateItemPayload, SetUserActivePayload, AuctionIdPayload {
     }
 
     public record LoginPayload(
@@ -108,5 +102,8 @@ public record Request(
     }
     public record SetUserActivePayload(UUID userId, boolean active) implements Payload {
         public SetUserActivePayload { Objects.requireNonNull(userId); }
+    }
+    public record AuctionIdPayload(UUID auctionId) implements Payload {
+        public AuctionIdPayload { Objects.requireNonNull(auctionId, "auctionId"); }
     }
 }

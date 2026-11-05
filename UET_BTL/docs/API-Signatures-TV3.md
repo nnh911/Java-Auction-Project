@@ -237,3 +237,45 @@ payload sai, chưa login, sai chủ, not found và session account bị khóa.
 Chưa chạy Maven/JUnit, GUI, Socket, Auction/Observer; các smoke test dùng main(),
 không tự chạy trong Surefire. Cần TV1 review quyền/error mapping; TV4 review State;
 TV2 bàn giao Auction/event trước khi hoàn tất toàn bộ kịch bản W7.
+
+## Đồng bộ bàn giao TV2 tuần 7 — 2026-11-05
+
+Đã triển khai phần TV3 theo tv2-week7-contract.md do người dùng cung cấp:
+
+- `client.network.AuctionGateway`: public interface, sáu chữ ký giữ nguyên hợp đồng:
+  `CompletionStage<AuctionDetail> getAuction(UUID)`,
+  `CompletionStage<AuctionDetail> placeBid(UUID, BigDecimal)`,
+  `CompletionStage<AuctionDetail> confirmPayment(UUID)`,
+  `CompletionStage<AuctionDetail> cancelAuction(UUID)`,
+  `void addEventListener(ClientEventListener)`, `void removeEventListener(ClientEventListener)`.
+  Đây là interface đã triển khai, chưa có adapter/transport thực thi. Các yêu cầu
+  non-null, bất đồng bộ và listener phải được adapter tuân thủ khi có code thật.
+- `ClientEventListener`: `void onEvent(EventMessage event)`; thay thế đề xuất cũ
+  có onConnectionLost trong schema-v1.md. Không sửa schema lịch sử để che khác biệt.
+- `GatewayException(ErrorCode errorCode, String message)` và
+  `ErrorCode getErrorCode()`: null bị NPE, message trắng bị IAE.
+- `Request.AuctionIdPayload(UUID auctionId)`: UUID non-null, thêm sealed permits;
+  dùng GET_AUCTION/CONFIRM_PAYMENT/CANCEL_AUCTION.
+- `EventMessage.EventType.PAYMENT_CONFIRMED` đã thêm; constructor giữ nguyên.
+- Dispatcher kiểm tra payload cho cả sáu command Auction; chưa dispatch nghiệp vụ
+  Auction vì code TV2 trong checkout/local origin/cngt7 còn tuần 6. Đúng payload
+  vẫn trả UNSUPPORTED_COMMAND sau kiểm tra session/active. Không giả lập thành công.
+
+Hợp đồng đã chốt, CHƯA triển khai do thiếu code TV2:
+GET/CREATE/PLACE_BID/CONFIRM_PAYMENT/CANCEL_AUCTION trả AuctionDetail;
+LIST_AUCTIONS trả ArrayList<AuctionSummary>, khác ListResult dùng cho User/Item
+(các command User/Item giữ nguyên). Không đổi kết quả pay/cancel thành Ack.
+Mapper event nội bộ chờ AuctionEvent thật; không tạo class giả trong src/main.
+Khi ghép Auction, bắt buộc tách khỏi lock bao ngoài của nhánh User/Item trước khi
+call public AuctionService; nếu không callback sau unlock của service vẫn nằm
+trong lock dispatcher. Hiện không có lời gọi Auction nào nên chưa phát sinh lỗi đó.
+
+Còn cần: code TV2 AuctionService/Manager/Observer, phân loại exception;
+TV1 triển khai getUser(UUID), isUserActive(UUID), getItem(UUID) theo hợp đồng TV2;
+TV2 nối quyền trong lock nghiệp vụ và TV4 nối State/lock. Không tự sửa module khác.
+
+Đã chạy: main + bốn smoke test biên dịch release 17; DispatcherSmokeTest,
+GatewayContractSmokeTest, ProtocolMapperSmokeTest, ClientStateSmokeTest PASS.
+GatewayContractSmokeTest kiểm tra AuctionIdPayload serialization, validation
+GatewayException và enum mới. ProtocolContractTest đã bổ sung event mới nhưng
+chưa chạy JUnit/Maven trong lượt này. Chưa kiểm chứng adapter async/event/FX.

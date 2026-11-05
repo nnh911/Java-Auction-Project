@@ -99,7 +99,10 @@ public final class CommandDispatcher {
             case CREATE_ITEM -> request.payload() instanceof CreateItemPayload;
             case GET_ITEM, DELETE_ITEM -> request.payload() instanceof ItemIdPayload;
             case UPDATE_ITEM -> request.payload() instanceof UpdateItemPayload;
-            default -> true; // Auction handlers await TV2 week-7 handoff.
+            case CREATE_AUCTION -> request.payload() instanceof CreateAuctionPayload;
+            case PLACE_BID -> request.payload() instanceof PlaceBidPayload;
+            case GET_AUCTION, CONFIRM_PAYMENT, CANCEL_AUCTION -> request.payload() instanceof AuctionIdPayload;
+            case LIST_AUCTIONS -> request.payload() instanceof EmptyPayload;
         };
     }
 
