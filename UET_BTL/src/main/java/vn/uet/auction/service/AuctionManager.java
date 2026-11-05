@@ -45,4 +45,19 @@ public final class AuctionManager {
     public AuctionSnapshot placeBid(UUID auctionId, UUID bidderId, BigDecimal amount) {
         return service.placeBid(auctionId, bidderId, amount);
     }
+    public void addListener(vn.uet.auction.observer.AuctionListener listener) {
+        service.addListener(listener);
+    }
+
+    public void removeListener(vn.uet.auction.observer.AuctionListener listener) {
+        service.removeListener(listener);
+    }
+
+    public AuctionSnapshot confirmPayment(UUID actorId, UUID auctionId) {
+        return service.confirmPayment(actorId, auctionId);
+    }
+
+    public AuctionSnapshot cancelAuction(UUID actorId, UUID auctionId) {
+        return service.cancelAuction(actorId, auctionId);
+    }
 }

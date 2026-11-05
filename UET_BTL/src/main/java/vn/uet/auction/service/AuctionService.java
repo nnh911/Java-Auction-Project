@@ -1,9 +1,3 @@
-// FILE KHUNG — CHƯA TRIỂN KHAI.
-// Phụ trách: Thành viên 2. Tuần học kỳ: 7–12.
-// Package dự kiến: vn.uet.auction.service
-// Mục đích: Tạo phiên, đặt giá, vòng đời, winner, payment mô phỏng và cancel.
-// TODO: Nhóm tự viết package, khai báo kiểu, field, constructor và method.
-// Thống nhất hợp đồng trước khi code; xem KE_HOACH_BTL_THEO_PDF.md.
 package vn.uet.auction.service;
 
 import java.math.BigDecimal;
@@ -17,9 +11,13 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.locks.ReentrantLock;
+import java.util.concurrent.CopyOnWriteArrayList;
+import vn.uet.auction.observer.AuctionEvent;
+import vn.uet.auction.observer.AuctionListener;
 import java.util.function.Supplier;
 import vn.uet.auction.model.auction.Auction;
 import vn.uet.auction.model.auction.AuctionStatus;
+import vn.uet.auction.model.auction.Bid;
 
 /**
  * Logic nghiệp vụ đấu giá. Đây là NƠI DUY NHẤT được sửa đối tượng Auction.
@@ -29,9 +27,15 @@ import vn.uet.auction.model.auction.AuctionStatus;
  *
  * Quy ước lock: mọi thao tác đọc-kiểm tra-ghi nằm trọn trong một lần giữ lock;
  * không trả đối tượng sống ra ngoài (chỉ trả AuctionSnapshot).
+ * Caller không được giữ lock inject khi gọi public API: listener cần chạy sau unlock hoàn toàn.
+ * Event trong từng thao tác theo thứ tự cập nhật; không cam kết thứ tự callback giữa các thread.
  */
 public class AuctionService {
 
+    private static final System.Logger LOGGER = System.getLogger(AuctionService.class.getName());
+    private final CopyOnWriteArrayList<AuctionListener> listeners = new CopyOnWriteArrayList<>();
+    // Only accessed under lock. Each operation drains its events before releasing lock.
+    private final List<AuctionEvent> pendingEvents = new ArrayList<>();
     private final Clock clock;
     private final ReentrantLock lock;
     private final Map<UUID, Auction> auctions;
@@ -77,7 +81,7 @@ public class AuctionService {
                 throw new IllegalStateException("Item đã có phiên đấu giá");
             }
             Auction auction = new Auction(UUID.randomUUID(), itemId, sellerId, startingPrice, start, end);
-            auction.refreshStatus(now);
+            refresh(auction, now);
             auctions.put(auction.getId(), auction);
             return AuctionSnapshot.of(auction);
         });
@@ -105,7 +109,7 @@ public class AuctionService {
             List<StatusChange> changes = new ArrayList<>();
             for (Auction a : auctions.values()) {
                 AuctionStatus before = a.getStatus();
-                a.refreshStatus(now);
+                refresh(a, now);
                 if (a.getStatus() != before) {
                     changes.add(new StatusChange(a.getId(), before, a.getStatus(), now));
                 }
@@ -115,22 +119,121 @@ public class AuctionService {
     }
 
     /**
-     * CHƯA VIẾT (tuần 7). Hợp đồng đã chốt, thứ tự kiểm tra BẮT BUỘC trong cùng một lần giữ lock:
-     * 1) đọc now một lần, refreshStatus(now); 2) bidder hợp lệ và không phải seller;
-     * 3) status == RUNNING, nếu không ném AuctionClosedException; 4) amount > currentPrice,
-     * nếu không ném InvalidBidException; 5) acceptBid; 6) thu event, phát SAU khi unlock.
-     * Nếu bước 1 làm phiên chuyển FINISHED thì bid bị từ chối nhưng vẫn phải phát AUCTION_FINISHED.
+     * Lõi đặt giá tuần 7: đọc giờ, kiểm tra và cập nhật trong cùng lock.
+     * Caller phải xác thực bidder/role/active trước khi gọi; API TV1 chưa có.
+     * Event phát sau unlock, kể cả chuyển trạng thái trước khi bid bị từ chối.
+     * Lỗi tạm thời: null -> NPE, không tìm thấy/giá sai/tự bid -> IAE,
+     * phiên không RUNNING -> ISE. Custom exceptions thuộc tuần 8.
      */
     public AuctionSnapshot placeBid(UUID auctionId, UUID bidderId, BigDecimal amount) {
-        throw new UnsupportedOperationException("Tuần 7: chưa cài đặt placeBid");
+        Objects.requireNonNull(auctionId, "auctionId");
+        Objects.requireNonNull(bidderId, "bidderId");
+        Objects.requireNonNull(amount, "amount");
+        return inLock(() -> {
+            Auction auction = auctions.get(auctionId);
+            if (auction == null) {
+                throw new IllegalArgumentException("Không tìm thấy phiên đấu giá");
+            }
+            Instant now = clock.instant();
+            refresh(auction, now);
+            if (auction.getSellerId().equals(bidderId)) {
+                throw new IllegalArgumentException("Chủ phiên không được tự đặt giá");
+            }
+            if (auction.getStatus() != AuctionStatus.RUNNING) {
+                throw new IllegalStateException("Phiên không nhận đặt giá: " + auction.getStatus());
+            }
+            if (amount.compareTo(auction.getCurrentPrice()) <= 0) {
+                throw new IllegalArgumentException("Giá đặt phải lớn hơn giá hiện tại");
+            }
+            auction.acceptBid(new Bid(UUID.randomUUID(), auctionId, bidderId, amount, now));
+            recordEvent(auction, auction.getStatus(), now, AuctionEvent.Type.BID_ACCEPTED);
+            return AuctionSnapshot.of(auction);
+        });
+    }
+
+    public void addListener(AuctionListener listener) {
+        listeners.addIfAbsent(Objects.requireNonNull(listener, "listener"));
+    }
+
+    public void removeListener(AuctionListener listener) {
+        listeners.remove(Objects.requireNonNull(listener, "listener"));
+    }
+
+    /** Caller supplies the authenticated actor ID. Only the winner can pay. */
+    public AuctionSnapshot confirmPayment(UUID actorId, UUID auctionId) {
+        Objects.requireNonNull(actorId, "actorId");
+        Objects.requireNonNull(auctionId, "auctionId");
+        return inLock(() -> {
+            Auction auction = requireAuction(auctionId);
+            Instant now = clock.instant();
+            refresh(auction, now);
+            if (!auction.getWinnerId().filter(actorId::equals).isPresent()) {
+                throw new IllegalArgumentException("Chỉ người thắng được xác nhận thanh toán");
+            }
+            AuctionStatus before = auction.getStatus();
+            auction.markPaid();
+            recordEvent(auction, before, now, AuctionEvent.Type.PAYMENT_CONFIRMED);
+            return AuctionSnapshot.of(auction);
+        });
+    }
+
+    /** Owner path only; Admin authorization awaits TV1 trusted user lookup API. */
+    public AuctionSnapshot cancelAuction(UUID actorId, UUID auctionId) {
+        Objects.requireNonNull(actorId, "actorId");
+        Objects.requireNonNull(auctionId, "auctionId");
+        return inLock(() -> {
+            Auction auction = requireAuction(auctionId);
+            if (!auction.getSellerId().equals(actorId)) {
+                throw new IllegalArgumentException("Chỉ chủ phiên được hủy qua API hiện tại");
+            }
+            Instant now = clock.instant();
+            refresh(auction, now);
+            AuctionStatus before = auction.getStatus();
+            auction.cancel();
+            recordEvent(auction, before, now, AuctionEvent.Type.AUCTION_CANCELED);
+            return AuctionSnapshot.of(auction);
+        });
+    }
+
+    private Auction requireAuction(UUID id) {
+        Auction auction = auctions.get(id);
+        if (auction == null) throw new IllegalArgumentException("Không tìm thấy phiên đấu giá");
+        return auction;
+    }
+
+    private void refresh(Auction auction, Instant now) {
+        AuctionStatus before = auction.getStatus();
+        auction.refreshStatus(now);
+        if (before != auction.getStatus()) {
+            recordEvent(auction, before, now, auction.getStatus() == AuctionStatus.RUNNING
+                    ? AuctionEvent.Type.AUCTION_STARTED : AuctionEvent.Type.AUCTION_FINISHED);
+        }
+    }
+
+    private void recordEvent(Auction auction, AuctionStatus before, Instant now, AuctionEvent.Type type) {
+        pendingEvents.add(new AuctionEvent(auction.getId(), before, auction.getStatus(), now,
+                AuctionSnapshot.of(auction), type));
     }
 
     private <T> T inLock(Supplier<T> body) {
+        List<AuctionEvent> events;
         lock.lock();
         try {
             return body.get();
         } finally {
+            events = List.copyOf(pendingEvents);
+            pendingEvents.clear();
             lock.unlock();
+            for (AuctionEvent event : events) {
+                for (AuctionListener listener : listeners) {
+                    try {
+                        listener.onAuctionEvent(event);
+                    } catch (RuntimeException failure) {
+                        LOGGER.log(System.Logger.Level.WARNING,
+                                "Auction listener failed for " + event.type(), failure);
+                    }
+                }
+            }
         }
     }
 }
