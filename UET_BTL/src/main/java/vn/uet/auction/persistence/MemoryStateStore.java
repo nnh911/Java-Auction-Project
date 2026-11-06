@@ -11,12 +11,12 @@ public class MemoryStateStore implements StateStore {
     }
 
     @Override
-    public ApplicationState load() throws IOException {
+    public synchronized ApplicationState load() throws IOException {
         return new ApplicationState(state);
     }
 
     @Override
-    public void save(ApplicationState state) throws IOException {
+    public synchronized void save(ApplicationState state) throws IOException {
         if (state == null) {
             throw new IllegalArgumentException("State must not be null");
         }
