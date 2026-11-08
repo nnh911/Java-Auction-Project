@@ -1,6 +1,36 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<!--
-  FILE KHUNG: auction. Phụ trách: Thành viên 2. Tuần 7–10.
-  TODO: Nhóm tự thiết kế layout bằng JavaFX/SceneBuilder, khai báo controller,
-  fx:id và event handler sau khi chốt hợp đồng. Chưa có root/layout để tải FXML.
--->
+
+<?import javafx.geometry.Insets?>
+<?import javafx.scene.control.Button?>
+<?import javafx.scene.control.Label?>
+<?import javafx.scene.control.TextField?>
+<?import javafx.scene.layout.HBox?>
+<?import javafx.scene.layout.VBox?>
+
+<VBox xmlns:fx="http://javafx.com/fxml/1"
+      fx:controller="vn.uet.auction.client.controller.AuctionController"
+      spacing="12" prefWidth="480">
+    <padding>
+        <Insets top="20" right="20" bottom="20" left="20"/>
+    </padding>
+    <Label text="Phiên đấu giá"/>
+    <HBox spacing="8">
+        <Label text="Trạng thái"/>
+        <Label fx:id="statusLabel" text="—"/>
+    </HBox>
+    <HBox spacing="8">
+        <Label text="Giá hiện tại"/>
+        <Label fx:id="currentPriceLabel" text="—"/>
+    </HBox>
+    <HBox spacing="8">
+        <Label text="Người thắng"/>
+        <Label fx:id="winnerLabel" text="—"/>
+    </HBox>
+    <HBox spacing="8">
+        <TextField fx:id="bidAmountField" promptText="Nhập giá" disable="true"
+                   onAction="#handlePlaceBid" HBox.hgrow="ALWAYS"/>
+        <Button fx:id="bidButton" text="Đặt giá" disable="true" onAction="#handlePlaceBid"/>
+        <Button fx:id="refreshButton" text="Làm mới" disable="true" onAction="#handleRefresh"/>
+    </HBox>
+    <Label fx:id="messageLabel" wrapText="true"/>
+</VBox>

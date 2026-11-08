@@ -1,9 +1,3 @@
-// FILE KIỂM THỬ KHUNG — CHƯA CÓ TEST CHẠY ĐƯỢC.
-// Phụ trách: Thành viên 2. Tuần học kỳ: 8–12.
-// Package dự kiến: vn.uet.auction.auction
-// Kịch bản cần tự viết: Tạo phiên, bid đúng/sai, payment/cancel, snapshot kết quả.
-// TODO: Tự khai báo package/class, JUnit test, fixture và assertion.
-// Chưa có kết quả PASS hoặc coverage cho dự án khung này.
 package vn.uet.auction.auction;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -157,8 +151,41 @@ class AuctionServiceTest {
     }
 
     @Test
-    void placeBidIsNotImplementedYet() {
-        assertThrows(UnsupportedOperationException.class,
-                () -> service.placeBid(UUID.randomUUID(), UUID.randomUUID(), PRICE));
+    void bidUpdatesHistoryAndWinnerAtEnd() {
+        AuctionSnapshot a = create();
+        UUID bidder = UUID.randomUUID();
+        clock.set(START);
+        AuctionSnapshot accepted = service.placeBid(a.id(), bidder, PRICE.add(BigDecimal.ONE));
+        assertEquals(1, accepted.bidCount());
+        assertEquals(START, accepted.bids().get(0).getPlacedAt());
+        assertEquals(0, a.bidCount());
+        assertTrue(accepted.winner().isEmpty());
+        clock.set(END);
+        assertThrows(IllegalStateException.class,
+                () -> service.placeBid(a.id(), bidder, PRICE.add(BigDecimal.TEN)));
+        AuctionSnapshot finished = service.getAuction(a.id()).orElseThrow();
+        assertEquals(AuctionStatus.FINISHED, finished.status());
+        assertEquals(bidder, finished.winner().orElseThrow());
+        assertEquals(1, finished.bidCount());
+    }
+
+    @Test
+    void rejectedBidsDoNotChangePriceOrHistory() {
+        AuctionSnapshot a = create();
+        UUID bidder = UUID.randomUUID();
+        assertThrows(IllegalStateException.class, () -> service.placeBid(a.id(), bidder, PRICE));
+        clock.set(START);
+        assertThrows(IllegalArgumentException.class, () -> service.placeBid(a.id(), seller, PRICE));
+        assertThrows(IllegalArgumentException.class, () -> service.placeBid(a.id(), bidder, PRICE));
+        assertThrows(IllegalArgumentException.class,
+                () -> service.placeBid(a.id(), bidder, BigDecimal.ZERO));
+        assertThrows(NullPointerException.class, () -> service.placeBid(a.id(), bidder, null));
+        assertThrows(IllegalArgumentException.class,
+                () -> service.placeBid(UUID.randomUUID(), bidder, PRICE));
+        AuctionSnapshot result = service.getAuction(a.id()).orElseThrow();
+        assertEquals(PRICE, result.currentPrice());
+        assertEquals(0, result.bidCount());
+        // An exception must release the lock; a later valid bid still succeeds.
+        assertEquals(1, service.placeBid(a.id(), bidder, PRICE.add(BigDecimal.ONE)).bidCount());
     }
 }

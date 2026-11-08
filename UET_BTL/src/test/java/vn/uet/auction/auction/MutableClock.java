@@ -1,22 +1,41 @@
 package vn.uet.auction.auction;
 
-import java.time.Clock;
-import java.time.Duration;
-import java.time.Instant;
-import java.time.ZoneId;
-import java.time.ZoneOffset;
+import java.time.*;
+import java.util.Objects;
+import java.util.concurrent.atomic.AtomicReference;
 
-/** Đồng hồ giả cho test: tự chỉnh giờ, không phải chờ thật. (TV4 sẽ có bản chung của nhóm; thay sau.) */
+/** Đồng hồ chỉnh được giờ: test không phải chờ thời gian thật. */
 public final class MutableClock extends Clock {
-    private volatile Instant now;
+    private final AtomicReference<Instant> currentTime;
+    private final ZoneId zone;
 
-    public MutableClock(Instant start) { this.now = start; }
+    public MutableClock(Instant start) {
+        this(new AtomicReference<>(Objects.requireNonNull(start)), ZoneOffset.UTC);
+    }
 
-    public void set(Instant instant) { this.now = instant; }
+    private MutableClock(AtomicReference<Instant> currentTime, ZoneId zone) {
+        this.currentTime = currentTime;
+        this.zone = Objects.requireNonNull(zone);
+    }
 
-    public void advance(Duration d) { this.now = now.plus(d); }
+    public void set(Instant time) {
+        currentTime.set(Objects.requireNonNull(time));
+    }
 
-    @Override public Instant instant() { return now; }
-    @Override public ZoneId getZone() { return ZoneOffset.UTC; }
-    @Override public Clock withZone(ZoneId zone) { return this; }
+    public void advance(Duration duration) {
+        Objects.requireNonNull(duration);
+        currentTime.updateAndGet(time -> time.plus(duration));
+    }
+
+    @Override
+    public Instant instant() { return currentTime.get(); }
+
+    @Override
+    public ZoneId getZone() { return zone; }
+
+    @Override
+    public Clock withZone(ZoneId newZone) {
+        // Khác múi giờ nhưng cùng một thời điểm đang được điều khiển.
+        return new MutableClock(currentTime, newZone);
+    }
 }
