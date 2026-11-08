@@ -2,6 +2,8 @@
 
 Cập nhật 2026-10-31 từ code nhánh tuần-6-chung (revision trước cập nhật tài liệu: 148da45). Đây là hợp đồng triển khai hiện tại để các thành viên/AI tiếp tục, không tuyên bố cả bốn người đã review hay mọi quy tắc nghiệp vụ đã được duyệt.
 
+Phần bổ sung TV1 tuần 7 ở cuối tài liệu thay thế các ghi chú "chưa có service/hash/active" đối với nhánh này.
+
 Đọc [bàn giao tuần 6](week6-handoff.md) trước khi triển khai tuần 7. Khi đổi chữ ký, cập nhật caller, test và tài liệu trong cùng thay đổi.
 
 ## Kiểu chung và trách nhiệm
@@ -104,3 +106,49 @@ verify(String password,String stored): boolean; sai mật khẩu/hash sai địn
 Đề xuất kế hoạch: không cho public register ADMIN; không tự bid; winner xác nhận thanh toán mô phỏng; owner/Admin hủy phiên chưa PAID; chặn sửa/xóa Item đã có phiên. Chưa coi là đã triển khai hoặc đã cả nhóm xác nhận.
 
 Nhóm cần ghi quyết định thật cho actor/role/active, password storage, đấu giá lại, giới hạn tiền, wiring State/lock, bids map/history, command payload/result/error mapping và save failure. Không suy ra các quyết định này chỉ từ tên API.
+
+
+## Bổ sung TV1 tuần 7 (nhánh nnhoangt7)
+
+Đây là quyết định triển khai để review, chưa phải xác nhận cả nhóm đã duyệt. Giữ nguyên constructor User/Item, Factory, DTO và PasswordHasher tuần 6.
+
+- `ApplicationState.getAccounts(): Map<UUID,AccountState>` lưu theo userId. `AccountState(passwordHash,active)` bất biến, Serializable, toString che hash. Copy constructor State sao chép cả map này; MemoryStateStore giữ được credentials/active. Không lưu password thô. Không trả AccountState qua protocol.
+- Khi tích hợp, khởi tạo `UserService(ApplicationState, ReentrantLock, PasswordHasher)`, `ItemService(ApplicationState, ReentrantLock)` và `AuctionService` với cùng một `ApplicationState` và cùng một `ReentrantLock`. `AuctionService` phải dùng map `state.getAuctions()` để `ItemService` thấy các phiên vừa tạo. Việc ghép `AuctionManager` vào State chung đang chờ TV2.
+- `register(String username,String password,Role): UserSummary`: chỉ BIDDER/SELLER; username theo model tuần 6 (strip, phân biệt hoa/thường, duy nhất); password không null/trắng, không strip trước hash.
+- `bootstrapAdmin(String,String): UserSummary`: chỉ dành cho startup tin cậy, chỉ chạy được khi chưa có Admin. TV3 không được expose thành command public. Không có password mặc định.
+- `login(String,String): UserSummary`: tên được strip; kiểm tra password và active. `listUsers(UUID actorId): List<UserSummary>` chỉ Admin đang active. DTO giữ nguyên schema, không thêm hash/active.
+- `setUserActive(UUID actorId,UUID userId,boolean): void`: Admin active; không khóa Admin active cuối cùng; user không tồn tại ném IllegalArgumentException.
+- `requireActive(UUID): UserSummary` tra lại trạng thái tài khoản trong State. `requireRole(UUID,Role): UserSummary` kiểm tra thêm role. Khi ghép dispatcher, TV3 lấy `actorId` từ session phía server và để service tra quyền trong State.
+- `createItem(UUID actorId,ItemType,String name,String description): UUID`: Seller active, Factory tuần 6.
+- `listItems(UUID actorId): List<ItemSummary>` và `getItem(UUID actorId,UUID itemId): Optional<ItemDetail>`: mọi account active được xem; không thấy trả Optional.empty; list không sửa được.
+- `updateItem(UUID actorId,UUID itemId,ItemType,String,String): void`, `deleteItem(UUID actorId,UUID itemId): void`: chỉ Seller sở hữu; chặn khi có **bất kỳ** phiên gắn Item, kể cả CANCELED, để giữ lịch sử. Update tạo Item bất biến thay thế, giữ ID/owner; validation lỗi không thay dữ liệu.
+- `requireOwnedItem(UUID actorId,UUID itemId): ItemDetail` kiểm tra tài khoản Seller đang hoạt động và sở hữu Item. Hàm này dùng để kiểm tra quyền sở hữu khi tạo phiên. Quy tắc chặn sửa/xóa Item đã có phiên nằm ở `updateItem` và `deleteItem`.
+
+### Bàn giao TV1 → TV2 trên nhánh chung
+
+TV1 bàn giao nguyên chữ ký `requireOwnedItem(UUID, UUID)` và `requireRole(UUID, Role)`. TV2 triển khai các bước dưới đây trên code đã merge của `tuần-7-chung`. TV3 dùng API public và truyền actor lấy từ session phía server.
+
+1. **Nối State và lock.** Tại nơi khởi tạo ứng dụng, tạo một `ApplicationState` và một `ReentrantLock`, rồi truyền cùng hai đối tượng đó cho User, Item và Auction. Inject `UserService` và `ItemService` đã được tạo vào `AuctionService`. Nếu luồng tích hợp đi qua `AuctionManager`, cho manager ủy quyền tới chính instance `AuctionService` đã ghép. Mọi đường tạo phiên trong luồng tích hợp phải ghi vào `state.getAuctions()` mà `ItemService` đọc.
+2. **Tạo phiên.** Trong `createAuction`, lấy lock chung rồi gọi `itemService.requireOwnedItem(sellerId, itemId)` trước khi thêm phiên. Giữ lock đến khi ghi xong để thao tác xóa Item hoặc khóa tài khoản không xen vào giữa bước kiểm tra và bước ghi.
+3. **Đặt giá.** Trong `placeBid`, lấy lock chung rồi gọi `userService.requireRole(bidderId, Role.BIDDER)` trước khi làm mới trạng thái phiên hoặc cập nhật bid. Giữ các kiểm tra hiện có về chủ phiên, thời gian và giá. Nếu sai role hoặc tài khoản đã bị khóa, trả lỗi quyền từ helper và giữ nguyên dữ liệu phiên.
+4. **Giữ ranh giới lock và Observer.** Dispatcher và manager gọi API public mà không giữ lock. `AuctionService` giữ lock cho toàn bộ bước kiểm tra và ghi, rồi nhả lock trước khi gọi listener. Giữ chữ ký public hiện có của thao tác tạo phiên và đặt giá để TV3 nối command.
+
+#### Ca nghiệm thu TV1 và TV2
+
+Dùng chung State và lock trong fixture. Tạo tài khoản qua `UserService`, tạo Item qua `ItemService` và gọi đấu giá qua cùng đường mà dispatcher sẽ dùng.
+
+| Ca kiểm tra | Kết quả cần thấy |
+|---|---|
+| Seller đang hoạt động tạo phiên cho Item của mình | Tạo thành công. Sửa hoặc xóa Item qua `ItemService` sau đó bị chặn. |
+| Seller khác tạo phiên cho Item chưa có phiên, hoặc Seller đã khóa tạo phiên cho Item của mình | Bị từ chối quyền. Số phiên giữ nguyên. |
+| Seller đặt giá vào phiên của người khác | Bị từ chối quyền. Giá và lịch sử bid giữ nguyên, không có sự kiện `BID_ACCEPTED`. |
+| Bidder đặt giá hợp lệ, sau đó Admin khóa tài khoản và Bidder đặt tiếp | Bid đầu thành công. Bid sau bị từ chối, giá và lịch sử giữ nguyên, không có thêm `BID_ACCEPTED`. |
+
+TV2 gửi lại commit và kết quả các ca trên để TV1 review phần quyền. Sau khi POM chính có JavaFX, chạy lại `mvn -f UET_BTL/pom.xml clean test` từ thư mục gốc repo. Việc thống nhất `getBids()` với lịch sử phiên và các quy tắc hủy/thanh toán được theo dõi riêng với TV4 và cả nhóm.
+
+### Lỗi và dữ liệu tài khoản
+- Lỗi tuần 7: SecurityException cho xác thực/quyền/active; IllegalStateException cho trùng tên, Admin đã khởi tạo, khóa Admin cuối, Item có phiên; IllegalArgumentException cho dữ liệu sai/đối tượng mutation không thấy; null bắt buộc theo model/Objects.requireNonNull. Custom exception và mapping protocol thuộc tuần 8/TV3, chưa thực hiện.
+- Account cũ chỉ có User mà thiếu AccountState bị từ chối xác thực, không tự gán password/active. Fixture cần đăng ký qua service hoặc seed cả hai map dưới lock.
+- Mọi truy cập trực tiếp maps State ở nơi tích hợp đều phải giữ lock chung. Chưa có lưu file, session mạng, handler command hoặc transaction save; không coi nhánh này là đã tích hợp production.
+
+Form Seller tuần 7 dùng `SellerController.Gateway` với dữ liệu giả qua `SellerPrototype`, chưa nối backend/mạng. `ClientApp` của TV4 giữ nguyên. Hai dependency JavaFX controls/fxml 17.0.16 trong pom chỉ để compile/chạy prototype.
