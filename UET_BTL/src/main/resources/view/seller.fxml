@@ -4,7 +4,7 @@
 <?import javafx.geometry.Insets?>
 <BorderPane xmlns:fx="http://javafx.com/fxml/1" fx:controller="vn.uet.auction.client.controller.SellerController" prefWidth="760" prefHeight="480">
  <padding><Insets top="16" right="16" bottom="16" left="16"/></padding>
- <top><Label text="Seller - Week 7 in-memory prototype"/></top>
+ <top><Label text="Seller - Week 8 in-memory prototype"/></top>
  <left><ListView fx:id="items" prefWidth="290"/></left>
  <center><VBox spacing="12"><padding><Insets left="16"/></padding>
   <Label text="Item type"/><ComboBox fx:id="type"/>

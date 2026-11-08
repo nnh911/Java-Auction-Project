@@ -68,4 +68,21 @@ class ItemServiceTest {
         assertThrows(IllegalStateException.class, () -> items.deleteItem(seller, id));
         assertEquals("Car", items.getItem(seller, id).orElseThrow().name());
     }
+
+    @Test void validatesItemFieldsWithoutReplacingExistingItem() {
+        String name = "x".repeat(120);
+        String description = "d".repeat(2000);
+        UUID id = items.createItem(seller, ItemType.ART, name, description);
+        var before = items.getItem(seller, id);
+        assertEquals(name, before.orElseThrow().name());
+        assertEquals(description, before.orElseThrow().description());
+        assertThrows(IllegalArgumentException.class,
+                () -> items.updateItem(seller, id, ItemType.ART, name + "x", description));
+        assertThrows(IllegalArgumentException.class,
+                () -> items.updateItem(seller, id, ItemType.ART, name, description + "d"));
+        assertThrows(NullPointerException.class, () -> items.createItem(seller, ItemType.ART, null, ""));
+        assertThrows(NullPointerException.class, () -> items.createItem(seller, ItemType.ART, name, null));
+        assertEquals(before, items.getItem(seller, id));
+        assertEquals(1, items.listItems(seller).size());
+    }
 }
