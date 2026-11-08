@@ -354,7 +354,7 @@ class ProtocolContractTest {
         @Test
         void containsEventTypesOfPlanSection34() {
             assertContainsAll(namesOf(EventMessage.EventType.values()), Set.of(
-                    "BID_ACCEPTED", "AUCTION_STARTED", "AUCTION_FINISHED", "AUCTION_CANCELED"));
+                    "BID_ACCEPTED", "AUCTION_STARTED", "AUCTION_FINISHED", "AUCTION_CANCELED", "PAYMENT_CONFIRMED"));
         }
 
         @Test

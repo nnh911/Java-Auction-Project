@@ -23,6 +23,7 @@ public record EventMessage(
         BID_ACCEPTED,
         AUCTION_STARTED,
         AUCTION_FINISHED,
-        AUCTION_CANCELED
+        AUCTION_CANCELED,
+        PAYMENT_CONFIRMED
     }
 }
