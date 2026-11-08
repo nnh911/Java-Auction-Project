@@ -228,3 +228,21 @@ failure/error/skipped; gồm 34 test đấu giá (6 lifecycle/Observer mới). C
 release 17 trên JDK 25. Log cảnh báo listener lỗi là tình huống kiểm thử chủ động.
 `git diff --check` sạch. Chưa kiểm chứng runtime JDK 17, GUI/Socket/production State
 hoặc đo coverage. Kết quả 28 tests phía trên là lượt kiểm tra trước khi bổ sung Observer.
+
+## TV2 — tích hợp quyền tạo phiên và đặt giá
+
+**Đã triển khai.** Backend User/Item và accounts lấy từ `origin/nnhoangt7`
+tại `fe14aa0`. AuctionManager tạo một ApplicationState và ReentrantLock dùng chung.
+Khi gọi qua Singleton, dùng `manager.getUserService()` và
+`manager.getItemService()` để thao tác trên cùng dữ liệu với phiên đấu giá.
+
+Constructor tích hợp là
+`AuctionService(Clock, ReentrantLock, ApplicationState, UserService, ItemService)`.
+Hai service được truyền vào phải dùng cùng state và lock. Constructor cũ dành cho
+kiểm thử lõi độc lập. createAuction gọi requireOwnedItem trong lock trước khi
+ghi phiên. placeBid gọi requireRole với BIDDER trong lock trước khi refresh.
+Sai quyền hoặc account bị khóa ném SecurityException. Observer chạy sau unlock.
+
+Dispatcher gọi service tích hợp hoặc manager trực tiếp, với actor từ session tin cậy.
+CommandDispatcher trong checkout này vẫn là file khung. Đã xác minh qua service
+và manager bằng Maven, 85 test pass.
