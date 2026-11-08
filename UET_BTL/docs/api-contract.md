@@ -246,3 +246,31 @@ Sai quyền hoặc account bị khóa ném SecurityException. Observer chạy sa
 Dispatcher gọi service tích hợp hoặc manager trực tiếp, với actor từ session tin cậy.
 CommandDispatcher trong checkout này vẫn là file khung. Đã xác minh qua service
 và manager bằng Maven, 85 test pass.
+
+## TV2 — hủy phiên và form nhập giá tuần 7
+
+**Đã triển khai.** Với service tích hợp, `cancelAuction(actorId, auctionId)`
+kiểm tra account active trong lock. Admin active hoặc Seller active sở hữu phiên
+được hủy OPEN, RUNNING hoặc FINISHED. Sai quyền ném SecurityException.
+Phiên PAID và CANCELED bị chặn theo quy tắc của Auction. Hủy thành công phát
+AUCTION_CANCELED sau unlock. Chữ ký service và manager giữ nguyên.
+
+Form `/view/auction.fxml` dùng `AuctionController`. Sau FXMLLoader.load, caller
+gọi hai API sau trên FX thread:
+
+```java
+void configure(Supplier<CompletionStage<AuctionDetail>> refresh,
+               Function<BigDecimal, CompletionStage<AuctionDetail>> placeBid)
+void dispose()
+```
+
+Caller gắn phiên và danh tính vào callback. Ví dụ khi adapter gateway của TV3
+đã sẵn sàng, truyền `() -> gateway.getAuction(auctionId)` và
+`amount -> gateway.placeBid(auctionId, amount)`. Form tự tải khi configure,
+cho làm mới thủ công và render kết quả trên FX thread. Callback phải trả stage
+ngay. Gọi dispose khi rời màn hình. Code gateway và điều hướng còn chờ ghép.
+
+Maven test đạt 86 test. Test đồng thời dùng 32 Bidder đăng ký thật với cùng
+state/lock, xác nhận giá cuối 33, lịch sử tăng nghiêm ngặt và mỗi bid được nhận
+có đúng một BID_ACCEPTED sau unlock. Đã kiểm tra tải FXML, cấu hình callback,
+nhập giá và cập nhật hiển thị bằng JavaFX với dữ liệu thử.

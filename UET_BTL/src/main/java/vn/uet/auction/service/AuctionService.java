@@ -199,14 +199,20 @@ public class AuctionService {
         });
     }
 
-    /** Owner path only; Admin authorization awaits TV1 trusted user lookup API. */
+    /** Service tích hợp cho phép Admin active hoặc Seller active sở hữu phiên hủy. */
     public AuctionSnapshot cancelAuction(UUID actorId, UUID auctionId) {
         Objects.requireNonNull(actorId, "actorId");
         Objects.requireNonNull(auctionId, "auctionId");
         return inLock(() -> {
             Auction auction = requireAuction(auctionId);
-            if (!auction.getSellerId().equals(actorId)) {
-                throw new IllegalArgumentException("Chỉ chủ phiên được hủy qua API hiện tại");
+            if (userService != null) {
+                Role role = userService.requireActive(actorId).role();
+                boolean owner = role == Role.SELLER && auction.getSellerId().equals(actorId);
+                if (role != Role.ADMIN && !owner) {
+                    throw new SecurityException("Chỉ Admin hoặc Seller chủ phiên được hủy");
+                }
+            } else if (!auction.getSellerId().equals(actorId)) {
+                throw new IllegalArgumentException("Chỉ chủ phiên được hủy trong chế độ độc lập");
             }
             Instant now = clock.instant();
             refresh(auction, now);
