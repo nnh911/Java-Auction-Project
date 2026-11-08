@@ -1,6 +1,8 @@
 package vn.uet.auction.protocol.mapper;
 
 import java.util.Objects;
+import vn.uet.auction.observer.AuctionEvent;
+import vn.uet.auction.protocol.EventMessage;
 import vn.uet.auction.model.user.User;
 import vn.uet.auction.model.item.Item;
 import vn.uet.auction.model.auction.Bid;
@@ -45,5 +47,16 @@ public final class ProtocolMapper {
                 snapshot.startingPrice(), snapshot.currentPrice(), snapshot.status(),
                 snapshot.start(), snapshot.end(), snapshot.winnerId(),
                 snapshot.bids().stream().map(ProtocolMapper::toBidSummary).toList());
+    }
+    public static EventMessage toEventMessage(AuctionEvent event) {
+        Objects.requireNonNull(event, "event");
+        var type = switch (event.type()) {
+            case BID_ACCEPTED -> EventMessage.EventType.BID_ACCEPTED;
+            case AUCTION_STARTED -> EventMessage.EventType.AUCTION_STARTED;
+            case AUCTION_FINISHED -> EventMessage.EventType.AUCTION_FINISHED;
+            case AUCTION_CANCELED -> EventMessage.EventType.AUCTION_CANCELED;
+            case PAYMENT_CONFIRMED -> EventMessage.EventType.PAYMENT_CONFIRMED;
+        };
+        return new EventMessage(type, event.auctionId(), event.occurredAt());
     }
 }

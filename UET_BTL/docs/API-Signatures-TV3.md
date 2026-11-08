@@ -279,3 +279,27 @@ GatewayContractSmokeTest, ProtocolMapperSmokeTest, ClientStateSmokeTest PASS.
 GatewayContractSmokeTest kiểm tra AuctionIdPayload serialization, validation
 GatewayException và enum mới. ProtocolContractTest đã bổ sung event mới nhưng
 chưa chạy JUnit/Maven trong lượt này. Chưa kiểm chứng adapter async/event/FX.
+
+
+## Tích hợp Auction tuần 7 — 08/11/2026
+
+Phần này cập nhật trạng thái Auction trong các mục trước. Đã tích hợp backend và test
+Auction từ TV2, origin/cngt7 @ 275fbed, vào working tree hthinht7.
+
+`CommandDispatcher(UserService, ItemService, ReentrantLock, AuctionService)`
+xử lý sáu command Auction. Constructor ba tham số vẫn dùng cho User/Item.
+Khởi tạo AuctionService bằng cùng ApplicationState, lock, UserService và ItemService.
+Dispatcher lấy actor từ Session và gọi AuctionService ngoài lock bao ngoài.
+`ProtocolMapper.toEventMessage(AuctionEvent)` giữ loại event, ID và thời điểm,
+chỉ chuyển dữ liệu cần để client refresh.
+
+Chữ ký service hiện có được giữ nguyên. Bổ sung phân loại lỗi có kiểu trong
+AuctionService và kiểm tra active cho pay/cancel dưới lock để dispatcher trả lỗi
+mà không đọc message. TV2 cần review hai thay đổi này. Cancel hiện theo quyền chủ
+phiên của bản TV2. Chỉ mục State.bids và adapter gateway nằm ngoài luồng này.
+
+Maven test offline đạt 86 test. Bốn smoke test chạy riêng đều PASS.
+DispatcherSmokeTest chạy bằng main và kiểm tra callback sau unlock, gồm luồng
+đăng nhập, CRUD, tạo phiên, bid, lấy chi tiết và hủy. Maven clean test offline
+dừng ở plugin clean vì cache thiếu dependency. Chưa có nhánh tuần-7-chung trên
+origin ở thời điểm kiểm tra.

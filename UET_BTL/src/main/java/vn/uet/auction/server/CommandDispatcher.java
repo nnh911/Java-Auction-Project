@@ -1,6 +1,7 @@
 package vn.uet.auction.server;
 
 import java.io.Serializable;
+import java.util.ArrayList;
 import java.util.Objects;
 import java.util.UUID;
 import java.util.concurrent.locks.ReentrantLock;
@@ -8,16 +9,25 @@ import vn.uet.auction.protocol.*;
 import vn.uet.auction.protocol.Request.*;
 import vn.uet.auction.protocol.dto.*;
 import vn.uet.auction.model.user.Role;
+import vn.uet.auction.protocol.mapper.ProtocolMapper;
+import vn.uet.auction.service.AuctionService;
 import vn.uet.auction.service.ItemService;
 import vn.uet.auction.service.UserService;
 
-/** Week 7 User/Item dispatcher. Supply the same application lock as both services. */
+/** In-memory dispatcher. Supply services configured with the same application state and lock. */
 public final class CommandDispatcher {
     private final UserService users;
     private final ItemService items;
     private final ReentrantLock lock;
+    private final AuctionService auctions;
 
     public CommandDispatcher(UserService users, ItemService items, ReentrantLock lock) {
+        this(users, items, lock, null);
+    }
+
+    public CommandDispatcher(UserService users, ItemService items, ReentrantLock lock,
+                             AuctionService auctions) {
+        this.auctions = auctions;
         this.users = Objects.requireNonNull(users);
         this.items = Objects.requireNonNull(items);
         this.lock = Objects.requireNonNull(lock);
@@ -27,9 +37,15 @@ public final class CommandDispatcher {
     public Response<? extends Serializable> dispatch(Session session, Request request) {
         Objects.requireNonNull(session);
         Objects.requireNonNull(request);
+        if (!validPayload(request)) return fail(request, ErrorCode.INVALID_REQUEST);
+        switch (request.command()) {
+            case CREATE_AUCTION, LIST_AUCTIONS, GET_AUCTION, PLACE_BID, CONFIRM_PAYMENT, CANCEL_AUCTION:
+                return dispatchAuction(session, request);
+            default:
+                break;
+        }
         lock.lock();
         try {
-            if (!validPayload(request)) return fail(request, ErrorCode.INVALID_REQUEST);
             if (request.command() == Command.LOGIN) {
                 session.clear();
                 LoginPayload p = (LoginPayload) request.payload();
@@ -88,6 +104,61 @@ public final class CommandDispatcher {
         } catch (RuntimeException e) {
             return fail(request, ErrorCode.INTERNAL_ERROR);
         } finally { lock.unlock(); }
+    }
+
+    private Response<? extends Serializable> dispatchAuction(Session session, Request request) {
+        if (!session.isAuthenticated()) return fail(request, ErrorCode.UNAUTHENTICATED);
+        UUID actor = session.userId();
+        try {
+            users.requireActive(actor);
+            if (auctions == null) return fail(request, ErrorCode.UNSUPPORTED_COMMAND);
+
+            // AuctionService owns the mutation lock and publishes events after releasing it.
+            Serializable result;
+            switch (request.command()) {
+                case CREATE_AUCTION -> {
+                    CreateAuctionPayload p = (CreateAuctionPayload) request.payload();
+                    result = ProtocolMapper.toAuctionDetail(auctions.createAuction(
+                            actor, p.itemId(), p.startingPrice(), p.startTime(), p.endTime()));
+                }
+                case LIST_AUCTIONS -> {
+                    var summaries = new ArrayList<AuctionSummary>();
+                    auctions.listAuctions().forEach(a -> summaries.add(ProtocolMapper.toAuctionSummary(a)));
+                    result = summaries;
+                }
+                case GET_AUCTION -> {
+                    var auction = auctions.getAuction(((AuctionIdPayload) request.payload()).auctionId());
+                    if (auction.isEmpty()) return fail(request, ErrorCode.NOT_FOUND);
+                    result = ProtocolMapper.toAuctionDetail(auction.get());
+                }
+                case PLACE_BID -> {
+                    PlaceBidPayload p = (PlaceBidPayload) request.payload();
+                    result = ProtocolMapper.toAuctionDetail(auctions.placeBid(p.auctionId(), actor, p.amount()));
+                }
+                case CONFIRM_PAYMENT -> result = ProtocolMapper.toAuctionDetail(
+                        auctions.confirmPayment(actor, ((AuctionIdPayload) request.payload()).auctionId()));
+                case CANCEL_AUCTION -> result = ProtocolMapper.toAuctionDetail(
+                        auctions.cancelAuction(actor, ((AuctionIdPayload) request.payload()).auctionId()));
+                default -> { return fail(request, ErrorCode.UNSUPPORTED_COMMAND); }
+            }
+            return Response.ok(request.requestId(), result);
+        } catch (AuctionService.Rejection e) {
+            return fail(request, switch (e.reason()) {
+                case NOT_FOUND -> ErrorCode.NOT_FOUND;
+                case FORBIDDEN -> ErrorCode.FORBIDDEN;
+                case INVALID_BID -> ErrorCode.INVALID_BID;
+                case CONFLICT -> ErrorCode.CONFLICT;
+            });
+        } catch (SecurityException e) {
+            return fail(request, ErrorCode.FORBIDDEN);
+        } catch (IllegalArgumentException e) {
+            return fail(request, ErrorCode.INVALID_REQUEST);
+        } catch (IllegalStateException e) {
+            return fail(request, request.command() == Command.PLACE_BID
+                    ? ErrorCode.AUCTION_CLOSED : ErrorCode.CONFLICT);
+        } catch (RuntimeException e) {
+            return fail(request, ErrorCode.INTERNAL_ERROR);
+        }
     }
 
     private static boolean validPayload(Request request) {
