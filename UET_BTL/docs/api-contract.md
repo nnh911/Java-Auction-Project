@@ -52,37 +52,91 @@ AuctionManager.getInstance dùng holder Singleton, facade gọi service. Manager
 
 AuctionSnapshot record gồm id,itemId,sellerId,startingPrice,currentPrice,start,end,status,highestBidderId,winnerId,bids. Hai bidder/winner ID có thể null. bids là List<Bid> được copy; winner() trả Optional và bidCount() trả int. Snapshot là nội bộ, không Serializable và không dùng trực tiếp làm Response.data.
 
-## TV3 — protocol v1 theo code hiện tại
+## TV3 — protocol v1, bàn giao tuần 8
 
-Đây là tên phiên bản tài liệu; code chưa có field version.
+**Đã triển khai.** Bảng dưới đây mô tả dispatcher tại bản tích hợp tuần 7 và cập nhật
+kiểm tra payload/session tuần 8. Chưa ghi nhận nhóm duyệt đóng băng schema.
+Mục TV3 ở baseline tuần 6 và các ghi chú lịch sử về dispatcher trong phần TV2
+phản ánh checkout cũ. Protocol v1 là tên schema tài liệu, chưa có trường version.
 
-Request(UUID requestId, Command command, Payload payload): cả ba không null. sealed Payload hiện chỉ có:
+`Request(UUID requestId, Command command, Payload payload)` và các record payload
+yêu cầu mọi trường tham chiếu có giá trị. Constructor từ chối null bằng
+`NullPointerException`. Dispatcher kiểm tra cặp command/payload trước khi gọi service.
+`LoginPayload` và `RegisterPayload` che credentials trong `toString()`.
 
-| Payload | Fields |
+| Command | Record payload thuộc `Request` | Kiểu `Response.data()` khi thành công |
+|---|---|---|
+| REGISTER | RegisterPayload(String username, String password, Role role) | UserSummary |
+| LOGIN | LoginPayload(String username, String password) | UserSummary |
+| LIST_USERS | EmptyPayload() | ListResult<UserSummary> |
+| SET_USER_ACTIVE | SetUserActivePayload(UUID userId, boolean active) | Ack |
+| CREATE_ITEM | CreateItemPayload(ItemType type, String name, String description) | UUID |
+| LIST_ITEMS | EmptyPayload() | ListResult<ItemSummary> |
+| GET_ITEM | ItemIdPayload(UUID itemId) | ItemDetail |
+| UPDATE_ITEM | UpdateItemPayload(UUID itemId, ItemType type, String name, String description) | Ack |
+| DELETE_ITEM | ItemIdPayload(UUID itemId) | Ack |
+| CREATE_AUCTION | CreateAuctionPayload(UUID itemId, BigDecimal startingPrice, Instant startTime, Instant endTime) | AuctionDetail |
+| LIST_AUCTIONS | EmptyPayload() | ArrayList<AuctionSummary> |
+| GET_AUCTION | AuctionIdPayload(UUID auctionId) | AuctionDetail |
+| PLACE_BID | PlaceBidPayload(UUID auctionId, BigDecimal amount) | AuctionDetail |
+| CONFIRM_PAYMENT | AuctionIdPayload(UUID auctionId) | AuctionDetail |
+| CANCEL_AUCTION | AuctionIdPayload(UUID auctionId) | AuctionDetail |
+
+`Response<T extends Serializable>(UUID requestId, boolean success, ErrorCode errorCode,
+String message, T data)` trả đúng ID của request. Thành công có data, errorCode null
+và message rỗng. Lỗi có data null và message bằng tên ErrorCode khi đi qua dispatcher.
+
+| Trường hợp | ErrorCode |
 |---|---|
-| LoginPayload | String username, String password |
-| CreateItemPayload | ItemType type, String name, String description |
-| CreateAuctionPayload | UUID itemId, BigDecimal startingPrice, Instant startTime, Instant endTime |
-| PlaceBidPayload | UUID auctionId, BigDecimal amount |
+| Sai kiểu payload hoặc service từ chối tham số bằng IllegalArgumentException thông thường | INVALID_REQUEST |
+| LOGIN bị từ chối bằng SecurityException | AUTHENTICATION_FAILED |
+| Command cần đăng nhập nhưng session trống | UNAUTHENTICATED |
+| Sai quyền, tài khoản bị khóa trong thao tác cần đăng nhập hoặc Rejection.FORBIDDEN | FORBIDDEN |
+| Không tìm thấy mục tiêu được kiểm tra trong dispatcher hoặc Rejection.NOT_FOUND | NOT_FOUND |
+| Rejection.INVALID_BID | INVALID_BID |
+| IllegalStateException trong PLACE_BID | AUCTION_CLOSED |
+| IllegalStateException ở command khác hoặc Rejection.CONFLICT | CONFLICT |
+| Dispatcher được khởi tạo thiếu AuctionService khi gọi command đấu giá bằng session hợp lệ | UNSUPPORTED_COMMAND |
+| RuntimeException khác, gồm NullPointerException nội bộ | INTERNAL_ERROR |
 
-Payload kiểm tra non-null, chưa thay kiểm tra nghiệp vụ. Request chưa tự kiểm tra command có khớp loại payload; dispatcher/gateway phải kiểm tra. LoginPayload.toString che credentials.
+Mỗi client dùng một `Session` do server/test tạo và gửi request tuần tự. Mọi request
+LOGIN xóa danh tính cũ trước khi xác thực, kể cả sai kiểu payload. REGISTER không
+đăng nhập. Actor lấy từ session và tài khoản active được kiểm tra lại khi thao tác.
 
-Command có REGISTER, LOGIN, LIST_USERS, SET_USER_ACTIVE, CREATE_ITEM, LIST_ITEMS, GET_ITEM, UPDATE_ITEM, DELETE_ITEM, CREATE_AUCTION, LIST_AUCTIONS, GET_AUCTION, PLACE_BID, CONFIRM_PAYMENT, CANCEL_AUCTION.
-Enum tồn tại không có nghĩa đã có payload/handler cho mọi command; không có empty payload hiện tại.
+```java
+var dispatcher = new CommandDispatcher(users, items, lock, auctions);
+var session = new Session();
+var login = dispatcher.dispatch(session, new Request(UUID.randomUUID(), Command.LOGIN,
+        new Request.LoginPayload(username, password)));
+if (login.success()) {
+    var itemsResponse = dispatcher.dispatch(session, new Request(UUID.randomUUID(),
+            Command.LIST_ITEMS, new Request.EmptyPayload()));
+}
+```
 
-Response<T extends Serializable>(UUID requestId, boolean success, ErrorCode errorCode, String message, T data):
-- ok(requestId,data): success true, errorCode null, message rỗng, data bắt buộc non-null.
-- fail(requestId,errorCode,message): success false, data null, errorCode bắt buộc, message không trắng.
-- Server/gateway phải trả đúng requestId; record không tự so với request.
-- Chưa có hợp đồng success không data; cần thiết kế trước khi làm delete/cancel trả void.
+Các service tích hợp dùng chung state và lock. Dispatcher để AuctionService tự
+quản lý lock để callback Observer chạy sau unlock. `ProtocolMapper` chuyển
+AuctionSnapshot thành AuctionSummary/AuctionDetail và chuyển history thành
+List<BidSummary>. winnerId có thể null. DTO phản hồi dùng giá trị và enum,
+không chứa entity hoặc thông tin xác thực.
 
-ErrorCode: INVALID_REQUEST, UNSUPPORTED_COMMAND, AUTHENTICATION_FAILED, UNAUTHENTICATED, FORBIDDEN, NOT_FOUND, CONFLICT, INVALID_BID, AUCTION_CLOSED, INTERNAL_ERROR. Đây là enum đã có; error mapping thật chưa hoàn thiện.
+`EventMessage(EventType eventType, UUID auctionId, Instant occurredAt)` hỗ trợ
+BID_ACCEPTED, AUCTION_STARTED, AUCTION_FINISHED, AUCTION_CANCELED và PAYMENT_CONFIRMED.
+Kiểm tra ObjectStream tuần 8 dùng byte array trong test. Command null bị từ chối
+khi dựng Request. Tên enum không nhận diện được trên stream thuộc tầng đọc dữ liệu
+tuần 9, trước khi dispatcher có Request để giữ requestId.
 
-EventMessage(EventType eventType, UUID auctionId, Instant occurredAt): tất cả non-null, Serializable. EventType: BID_ACCEPTED, AUCTION_STARTED, AUCTION_FINISHED, AUCTION_CANCELED. Chưa có transport phát event thật.
-
-DTO Serializable: UserSummary, ItemSummary, ItemDetail, BidSummary, AuctionSummary, AuctionDetail. Đọc constructor record thật khi mapping. AuctionDetail gồm id,itemId,sellerId,startingPrice,currentPrice,status,startTime,endTime,winnerId,history; winnerId được null, history là List<BidSummary> được copy.
-
-Mapping cần viết: snapshot.start/end → DTO.startTime/endTime; snapshot.bids → từng BidSummary trong history; winnerId giữ null nếu chưa có. Chưa có mapper production. Kiểu response cho từng command cần TV3 thống nhất với chủ service; không tự coi ví dụ fake là API đã duyệt.
+**Đề xuất để nhóm duyệt.** Sau khi TV1/TV2 chốt exception, ánh xạ lỗi xác thực,
+giá bid và phiên đóng sang AUTHENTICATION_FAILED, INVALID_BID và AUCTION_CLOSED.
+Giữ nguyên chữ ký `Response<? extends Serializable> dispatch(Session session, Request request)`.
+Chữ ký constructor đề xuất cho chủ file xem xét là
+`public AuthenticationException(String message)` (TV1),
+`public InvalidBidException(String message)` và
+`public AuctionClosedException(String message)` (TV2).
+Cần chốt lớp cha, checked/unchecked, điều kiện ném và thứ tự ưu tiên nếu request
+vi phạm nhiều điều kiện. Mapping
+IllegalStateException của PLACE_BID hiện còn gom cả lỗi trạng thái nội bộ của
+service. Cần nhóm xác nhận các kiểu danh sách hiện có trước khi đóng băng schema.
 
 ## TV4 — StateStore và password
 

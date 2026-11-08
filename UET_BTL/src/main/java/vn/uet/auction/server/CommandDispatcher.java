@@ -37,17 +37,19 @@ public final class CommandDispatcher {
     public Response<? extends Serializable> dispatch(Session session, Request request) {
         Objects.requireNonNull(session);
         Objects.requireNonNull(request);
-        if (!validPayload(request)) return fail(request, ErrorCode.INVALID_REQUEST);
         switch (request.command()) {
             case CREATE_AUCTION, LIST_AUCTIONS, GET_AUCTION, PLACE_BID, CONFIRM_PAYMENT, CANCEL_AUCTION:
-                return dispatchAuction(session, request);
+                return validPayload(request)
+                        ? dispatchAuction(session, request)
+                        : fail(request, ErrorCode.INVALID_REQUEST);
             default:
                 break;
         }
         lock.lock();
         try {
+            if (request.command() == Command.LOGIN) session.clear();
+            if (!validPayload(request)) return fail(request, ErrorCode.INVALID_REQUEST);
             if (request.command() == Command.LOGIN) {
-                session.clear();
                 LoginPayload p = (LoginPayload) request.payload();
                 UserSummary user = users.login(p.username(), p.password());
                 session.bind(user);
@@ -97,7 +99,7 @@ public final class CommandDispatcher {
         } catch (SecurityException e) {
             return fail(request, request.command() == Command.LOGIN
                     ? ErrorCode.AUTHENTICATION_FAILED : ErrorCode.FORBIDDEN);
-        } catch (IllegalArgumentException | NullPointerException e) {
+        } catch (IllegalArgumentException e) {
             return fail(request, ErrorCode.INVALID_REQUEST);
         } catch (IllegalStateException e) {
             return fail(request, ErrorCode.CONFLICT);
