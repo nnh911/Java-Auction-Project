@@ -15,13 +15,18 @@ public class ApplicationState {
     private Map<UUID, Item> items;
     private Map<UUID, Auction> auctions;
     private Map<UUID, Bid> bids;
+    private Map<UUID, AccountState> accounts;
 
     public ApplicationState() {
         users = new HashMap<>();
         items = new HashMap<>();
         auctions = new HashMap<>();
         bids = new HashMap<>();
+        accounts = new HashMap<>();
     }
+
+    /** Internal only; access under the shared application lock. */
+    public Map<UUID, AccountState> getAccounts() { return accounts; }
 
     public Map<UUID, User> getUsers() {
         return users;
@@ -47,6 +52,7 @@ public class ApplicationState {
         this.items = new HashMap<>(other.items);
         this.auctions = new HashMap<>();
         this.bids = new HashMap<>(other.bids);
+        this.accounts = new HashMap<>(other.accounts);
 
         for (Map.Entry<UUID, Auction> entry : other.auctions.entrySet()) {
             this.auctions.put(entry.getKey(), new Auction(entry.getValue()));
