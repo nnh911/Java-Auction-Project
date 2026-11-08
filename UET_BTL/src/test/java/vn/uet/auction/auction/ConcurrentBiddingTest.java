@@ -1,77 +1,91 @@
 package vn.uet.auction.auction;
 
+import static org.junit.jupiter.api.Assertions.*;
+import java.math.BigDecimal;
+import java.time.Clock;
+import java.time.Duration;
+import java.time.ZoneId;
+import java.time.Instant;
+import java.time.ZoneOffset;
+import java.util.ArrayList;
+import java.util.Map;
+import java.util.HashMap;
+import java.util.UUID;
+import java.util.concurrent.*;
+import java.util.concurrent.locks.ReentrantLock;
 import org.junit.jupiter.api.Test;
-import vn.uet.auction.model.auction.Bid;
+import vn.uet.auction.model.item.ItemType;
+import vn.uet.auction.model.user.Role;
 import vn.uet.auction.observer.AuctionEvent;
 import vn.uet.auction.persistence.ApplicationState;
 import vn.uet.auction.persistence.MemoryStateStore;
+import vn.uet.auction.model.auction.Bid;
+import vn.uet.auction.security.PasswordHasher;
+import vn.uet.auction.service.ItemService;
+import vn.uet.auction.service.UserService;
 import vn.uet.auction.service.AuctionService;
-import java.math.BigDecimal;
-import java.time.*;
-import java.util.*;
-import java.util.concurrent.*;
-import java.util.concurrent.atomic.AtomicInteger;
-import java.util.concurrent.locks.ReentrantLock;
-import static org.junit.jupiter.api.Assertions.*;
 
-/** TV4 hỗ trợ TV2: không sửa logic service của TV2. */
 class ConcurrentBiddingTest {
     @Test
-    void concurrentBidsKeepPriceAndHistoryConsistent() throws Exception {
-        Instant now = Instant.parse("2026-11-05T00:00:00Z");
+    void concurrentBidsKeepHighestPriceAndStrictlyIncreasingHistory() throws Exception {
+        Instant now = Instant.parse("2026-11-02T00:00:00Z");
         ApplicationState state = new ApplicationState();
         ReentrantLock lock = new ReentrantLock();
-        AuctionService service = new AuctionService(new MutableClock(now), lock, state);
-        // Khi nối kiểm tra quyền, seed Seller/Item/Bidder qua service TV1 dưới lock chung.
-        var auction = service.createAuction(UUID.randomUUID(), UUID.randomUUID(),
-                new BigDecimal("100"), now, now.plusSeconds(60));
-        AtomicInteger acceptedEvents = new AtomicInteger();
+        UserService users = new UserService(state, lock, new PasswordHasher());
+        ItemService items = new ItemService(state, lock);
+        AuctionService service = new AuctionService(Clock.fixed(now, ZoneOffset.UTC), lock, state, users, items);
+        UUID seller = users.register("seller", "test-password", Role.SELLER).id();
+        UUID item = items.createItem(seller, ItemType.ART, "Painting", "");
+        var auction = service.createAuction(seller, item, BigDecimal.ONE, now, now.plusSeconds(60));
+        var events = new ConcurrentLinkedQueue<AuctionEvent>();
         service.addListener(event -> {
-            if (event.type() == AuctionEvent.Type.BID_ACCEPTED) {
-                acceptedEvents.incrementAndGet();
-            }
+            assertFalse(lock.isHeldByCurrentThread());
+            events.add(event);
         });
-        int numberOfBids = 32;
-        ExecutorService executor = Executors.newFixedThreadPool(numberOfBids);
-        CountDownLatch ready = new CountDownLatch(numberOfBids);
+        int count = 32;
+        var bidders = new ArrayList<UUID>();
+        for (int i = 0; i < count; i++) {
+            bidders.add(users.register("bidder_" + i, "test-password", Role.BIDDER).id());
+        }
+        ExecutorService pool = Executors.newFixedThreadPool(count);
+        CountDownLatch ready = new CountDownLatch(count);
         CountDownLatch start = new CountDownLatch(1);
-        List<Future<Boolean>> results = new ArrayList<>();
+        var results = new ArrayList<Future<Boolean>>();
         try {
-            for (int index = 1; index <= numberOfBids; index++) {
-                BigDecimal amount = BigDecimal.valueOf(100 + index);
-                UUID bidderId = UUID.randomUUID();
-                results.add(executor.submit(() -> {
+            for (int i = 0; i < count; i++) {
+                BigDecimal amount = BigDecimal.valueOf(i + 2);
+                UUID bidder = bidders.get(i);
+                results.add(pool.submit(() -> {
                     ready.countDown();
-                    if (!start.await(5, TimeUnit.SECONDS)) {
-                        throw new IllegalStateException("Không nhận tín hiệu bắt đầu");
-                    }
+                    assertTrue(start.await(10, TimeUnit.SECONDS));
                     try {
-                        service.placeBid(auction.id(), bidderId, amount);
+                        service.placeBid(auction.id(), bidder, amount);
                         return true;
-                    } catch (IllegalArgumentException expected) {
-                        // Giá thấp có thể thua giá cao đến trước. Review loại lỗi với TV2.
+                    } catch (IllegalArgumentException rejectedLowerBid) {
                         return false;
                     }
                 }));
             }
-            assertTrue(ready.await(5, TimeUnit.SECONDS));
+            assertTrue(ready.await(10, TimeUnit.SECONDS));
             start.countDown();
-            int acceptedCount = 0;
+            int accepted = 0;
             for (Future<Boolean> result : results) {
-                if (result.get(5, TimeUnit.SECONDS)) { acceptedCount++; }
+                if (result.get(10, TimeUnit.SECONDS)) accepted++;
             }
             var snapshot = service.getAuction(auction.id()).orElseThrow();
-            assertEquals(0, BigDecimal.valueOf(100 + numberOfBids).compareTo(snapshot.currentPrice()));
-            assertEquals(acceptedCount, snapshot.bidCount());
-            BigDecimal previous = new BigDecimal("100");
-            Set<UUID> bidIds = new HashSet<>();
+            assertEquals(BigDecimal.valueOf(count + 1), snapshot.currentPrice());
+            assertEquals(accepted, snapshot.bidCount());
+            assertEquals(accepted, events.size());
+            assertTrue(events.stream().allMatch(event -> event.type() == AuctionEvent.Type.BID_ACCEPTED));
+            BigDecimal previous = BigDecimal.ONE;
+            var ids = new java.util.HashSet<UUID>();
             for (var bid : snapshot.bids()) {
                 assertTrue(bid.getAmount().compareTo(previous) > 0);
-                assertTrue(bidIds.add(bid.getId()));
+                assertTrue(ids.add(bid.getId()));
+                assertEquals(auction.id(), bid.getAuctionId());
                 previous = bid.getAmount();
             }
-            assertEquals(0, previous.compareTo(snapshot.currentPrice()));
-            assertEquals(acceptedCount, acceptedEvents.get());
+            assertEquals(snapshot.currentPrice(), previous);
             Map<UUID, Bid> expectedIndex = new HashMap<>();
             for (Bid bid : snapshot.bids()) {
                 expectedIndex.put(bid.getId(), bid);
@@ -79,10 +93,10 @@ class ConcurrentBiddingTest {
             assertEquals(expectedIndex, state.getBids());
 
             assertThrows(IllegalArgumentException.class,
-                    () -> service.placeBid(auction.id(), UUID.randomUUID(), snapshot.currentPrice()));
+                    () -> service.placeBid(auction.id(), bidders.get(0), snapshot.currentPrice()));
             assertEquals(snapshot, service.getAuction(auction.id()).orElseThrow());
             assertEquals(expectedIndex, state.getBids());
-            assertEquals(acceptedCount, acceptedEvents.get());
+            assertEquals(accepted, events.size());
 
             MemoryStateStore store = new MemoryStateStore();
             lock.lock();
@@ -98,13 +112,13 @@ class ConcurrentBiddingTest {
             loaded.getAuctions().clear();
             assertEquals(expectedIndex, store.load().getBids());
             assertEquals(snapshot.bids(), store.load().getAuctions().get(auction.id()).getHistory());
+
         } finally {
             start.countDown();
-            executor.shutdownNow();
-            assertTrue(executor.awaitTermination(5, TimeUnit.SECONDS));
+            pool.shutdownNow();
+            assertTrue(pool.awaitTermination(10, TimeUnit.SECONDS));
         }
     }
-
     @Test
     void clockCanAdvanceAndShareTimeAcrossZones() {
         Instant now = Instant.parse("2026-11-05T00:00:00Z");

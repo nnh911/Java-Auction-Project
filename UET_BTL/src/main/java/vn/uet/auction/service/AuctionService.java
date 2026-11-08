@@ -10,20 +10,21 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.UUID;
-import java.util.concurrent.locks.ReentrantLock;
 import java.util.concurrent.CopyOnWriteArrayList;
-import vn.uet.auction.observer.AuctionEvent;
-import vn.uet.auction.observer.AuctionListener;
+import java.util.concurrent.locks.ReentrantLock;
 import java.util.function.Supplier;
 import vn.uet.auction.model.auction.Auction;
 import vn.uet.auction.model.auction.AuctionStatus;
 import vn.uet.auction.model.auction.Bid;
+import vn.uet.auction.model.user.Role;
 import vn.uet.auction.persistence.ApplicationState;
+import vn.uet.auction.observer.AuctionEvent;
+import vn.uet.auction.observer.AuctionListener;
 
 /**
  * Logic nghiệp vụ đấu giá. Đây là NƠI DUY NHẤT được sửa đối tượng Auction.
  *
- * Phụ thuộc: chỉ Clock, một lock và một map dữ liệu, tất cả truyền qua constructor.
+ * Khi tích hợp, các service chia sẻ ApplicationState và lock.
  * Không biết Singleton, JavaFX, Socket. Vì vậy test được bằng new AuctionService(fakeClock).
  *
  * Quy ước lock: mọi thao tác đọc-kiểm tra-ghi nằm trọn trong một lần giữ lock;
@@ -33,6 +34,20 @@ import vn.uet.auction.persistence.ApplicationState;
  */
 public class AuctionService {
 
+    /** Distinguishes business rejections while preserving the existing argument exception contract. */
+    public static final class Rejection extends IllegalArgumentException {
+        public enum Reason { NOT_FOUND, FORBIDDEN, INVALID_BID, CONFLICT }
+
+        private final Reason reason;
+
+        private Rejection(Reason reason, String message) {
+            super(message);
+            this.reason = reason;
+        }
+
+        public Reason reason() { return reason; }
+    }
+
     private static final System.Logger LOGGER = System.getLogger(AuctionService.class.getName());
     private final CopyOnWriteArrayList<AuctionListener> listeners = new CopyOnWriteArrayList<>();
     // Only accessed under lock. Each operation drains its events before releasing lock.
@@ -41,38 +56,43 @@ public class AuctionService {
     private final ReentrantLock lock;
     private final Map<UUID, Auction> auctions;
     private final Map<UUID, Bid> bids;
+    private final UserService userService;
+    private final ItemService itemService;
 
     /** Dùng cho test và chạy độc lập: lock và dữ liệu riêng. */
     public AuctionService(Clock clock) {
         this(clock, new ReentrantLock(), new LinkedHashMap<>());
     }
 
-    /**
-     * Dùng khi ghép hệ thống: lock chung tạo ở nơi khởi tạo ứng dụng, map lấy từ
-     * ApplicationState (TV4). Map chỉ được truy cập khi đang giữ lock này.
-     */
+    /** Lõi độc lập dành cho test nghiệp vụ không có tài khoản hoặc Item. */
     public AuctionService(Clock clock, ReentrantLock lock, Map<UUID, Auction> auctions) {
-        this(clock, lock, auctions, new LinkedHashMap<>());
+        this(clock, lock, auctions, new LinkedHashMap<>(), null, null);
     }
 
-    public AuctionService(Clock clock, ReentrantLock lock, ApplicationState state) {
-        this(clock, lock, state.getAuctions(), state.getBids());
+    /** UserService và ItemService phải dùng cùng state và lock với AuctionService. */
+    public AuctionService(Clock clock, ReentrantLock lock, ApplicationState state,
+                          UserService userService, ItemService itemService) {
+        this(clock, lock, Objects.requireNonNull(state, "state").getAuctions(), state.getBids(),
+                Objects.requireNonNull(userService, "userService"),
+                Objects.requireNonNull(itemService, "itemService"));
     }
 
-    private AuctionService(Clock clock, ReentrantLock lock,
-                           Map<UUID, Auction> auctions, Map<UUID, Bid> bids) {
+    private AuctionService(Clock clock, ReentrantLock lock, Map<UUID, Auction> auctions,
+                           Map<UUID, Bid> bids, UserService userService, ItemService itemService) {
         this.clock = Objects.requireNonNull(clock, "clock");
         this.lock = Objects.requireNonNull(lock, "lock");
         this.auctions = Objects.requireNonNull(auctions, "auctions");
-        this.bids = Objects.requireNonNull(bids, "bids");
+        this.bids = bids;
+        this.userService = userService;
+        this.itemService = itemService;
     }
 
     /**
      * Tạo phiên mới. Trạng thái ban đầu là OPEN, hoặc RUNNING nếu start đã qua.
      * Ném IllegalArgumentException khi dữ liệu sai, IllegalStateException khi Item đã có phiên
      * (tuần 8 sẽ đổi sang exception nghiệp vụ của nhóm).
-     * TODO tuần 7: kiểm tra seller đúng role và sở hữu Item qua service của TV1 (gọi trước khi
-     * lấy lock hoặc dùng lock chung để tránh deadlock).
+     * Tích hợp TV1: requireOwnedItem phải chạy bên trong lock này, xuyên suốt tới khi thêm phiên.
+     * Kiểm tra trước khi lấy lock có thể bị vô hiệu bởi sửa/xóa Item hoặc khóa tài khoản.
      */
     public AuctionSnapshot createAuction(UUID sellerId, UUID itemId, BigDecimal startingPrice,
                                          Instant start, Instant end) {
@@ -82,6 +102,14 @@ public class AuctionService {
         Objects.requireNonNull(start, "start");
         Objects.requireNonNull(end, "end");
         return inLock(() -> {
+            if (itemService != null) {
+                try {
+                    itemService.requireOwnedItem(sellerId, itemId);
+                } catch (IllegalArgumentException e) {
+                    // With a non-null ID, this lookup uses IAE only for a missing Item.
+                    throw new Rejection(Rejection.Reason.NOT_FOUND, "Không tìm thấy Item");
+                }
+            }
             Instant now = clock.instant();
             if (!end.isAfter(now)) {
                 throw new IllegalArgumentException("Thời điểm kết thúc phải ở tương lai");
@@ -132,7 +160,7 @@ public class AuctionService {
 
     /**
      * Lõi đặt giá tuần 7: đọc giờ, kiểm tra và cập nhật trong cùng lock.
-     * Caller phải xác thực bidder/role/active trước khi gọi; API TV1 chưa có.
+     * Actor phải lấy từ session tin cậy. Service tích hợp kiểm tra role/active trong lock.
      * Event phát sau unlock, kể cả chuyển trạng thái trước khi bid bị từ chối.
      * Lỗi tạm thời: null -> NPE, không tìm thấy/giá sai/tự bid -> IAE,
      * phiên không RUNNING -> ISE. Custom exceptions thuộc tuần 8.
@@ -142,20 +170,20 @@ public class AuctionService {
         Objects.requireNonNull(bidderId, "bidderId");
         Objects.requireNonNull(amount, "amount");
         return inLock(() -> {
-            Auction auction = auctions.get(auctionId);
-            if (auction == null) {
-                throw new IllegalArgumentException("Không tìm thấy phiên đấu giá");
+            if (userService != null) {
+                userService.requireRole(bidderId, Role.BIDDER);
             }
+            Auction auction = requireAuction(auctionId);
             Instant now = clock.instant();
             refresh(auction, now);
             if (auction.getSellerId().equals(bidderId)) {
-                throw new IllegalArgumentException("Chủ phiên không được tự đặt giá");
+                throw new Rejection(Rejection.Reason.FORBIDDEN, "Chủ phiên không được tự đặt giá");
             }
             if (auction.getStatus() != AuctionStatus.RUNNING) {
                 throw new IllegalStateException("Phiên không nhận đặt giá: " + auction.getStatus());
             }
             if (amount.compareTo(auction.getCurrentPrice()) <= 0) {
-                throw new IllegalArgumentException("Giá đặt phải lớn hơn giá hiện tại");
+                throw new Rejection(Rejection.Reason.INVALID_BID, "Giá đặt phải lớn hơn giá hiện tại");
             }
             Bid bid = new Bid(UUID.randomUUID(), auctionId, bidderId, amount, now);
             auction.acceptBid(bid);
@@ -178,11 +206,16 @@ public class AuctionService {
         Objects.requireNonNull(actorId, "actorId");
         Objects.requireNonNull(auctionId, "auctionId");
         return inLock(() -> {
+            if (userService != null) {
+                userService.requireActive(actorId);
+            }
             Auction auction = requireAuction(auctionId);
             Instant now = clock.instant();
             refresh(auction, now);
             if (!auction.getWinnerId().filter(actorId::equals).isPresent()) {
-                throw new IllegalArgumentException("Chỉ người thắng được xác nhận thanh toán");
+                Rejection.Reason reason = auction.getWinnerId().isPresent()
+                        ? Rejection.Reason.FORBIDDEN : Rejection.Reason.CONFLICT;
+                throw new Rejection(reason, "Chỉ người thắng được xác nhận thanh toán");
             }
             AuctionStatus before = auction.getStatus();
             auction.markPaid();
@@ -191,14 +224,20 @@ public class AuctionService {
         });
     }
 
-    /** Owner path only; Admin authorization awaits TV1 trusted user lookup API. */
+    /** Service tích hợp cho phép Admin active hoặc Seller active sở hữu phiên hủy. */
     public AuctionSnapshot cancelAuction(UUID actorId, UUID auctionId) {
         Objects.requireNonNull(actorId, "actorId");
         Objects.requireNonNull(auctionId, "auctionId");
         return inLock(() -> {
             Auction auction = requireAuction(auctionId);
-            if (!auction.getSellerId().equals(actorId)) {
-                throw new IllegalArgumentException("Chỉ chủ phiên được hủy qua API hiện tại");
+            if (userService != null) {
+                Role role = userService.requireActive(actorId).role();
+                boolean owner = role == Role.SELLER && auction.getSellerId().equals(actorId);
+                if (role != Role.ADMIN && !owner) {
+                    throw new SecurityException("Chỉ Admin hoặc Seller chủ phiên được hủy");
+                }
+            } else if (!auction.getSellerId().equals(actorId)) {
+                throw new Rejection(Rejection.Reason.FORBIDDEN, "Chỉ chủ phiên được hủy trong chế độ độc lập");
             }
             Instant now = clock.instant();
             refresh(auction, now);
@@ -211,7 +250,7 @@ public class AuctionService {
 
     private Auction requireAuction(UUID id) {
         Auction auction = auctions.get(id);
-        if (auction == null) throw new IllegalArgumentException("Không tìm thấy phiên đấu giá");
+        if (auction == null) throw new Rejection(Rejection.Reason.NOT_FOUND, "Không tìm thấy phiên đấu giá");
         return auction;
     }
 
@@ -230,6 +269,12 @@ public class AuctionService {
     }
 
     private <T> T inLock(Supplier<T> body) {
+        // Reentrant acquisition would release only our hold, leaving the caller's hold active
+        // during callbacks. Fail before any business mutation instead.
+        if (lock.isHeldByCurrentThread()) {
+            throw new IllegalStateException(
+                    "Không gọi AuctionService khi caller đang giữ lock chung");
+        }
         List<AuctionEvent> events;
         lock.lock();
         try {

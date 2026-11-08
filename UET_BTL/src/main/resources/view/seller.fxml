@@ -1,6 +1,16 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<!--
-  FILE KHUNG: seller. Phụ trách: Thành viên 1. Tuần 7–10.
-  TODO: Nhóm tự thiết kế layout bằng JavaFX/SceneBuilder, khai báo controller,
-  fx:id và event handler sau khi chốt hợp đồng. Chưa có root/layout để tải FXML.
--->
+<?import javafx.scene.control.*?>
+<?import javafx.scene.layout.*?>
+<?import javafx.geometry.Insets?>
+<BorderPane xmlns:fx="http://javafx.com/fxml/1" fx:controller="vn.uet.auction.client.controller.SellerController" prefWidth="760" prefHeight="480">
+ <padding><Insets top="16" right="16" bottom="16" left="16"/></padding>
+ <top><Label text="Seller - Week 7 in-memory prototype"/></top>
+ <left><ListView fx:id="items" prefWidth="290"/></left>
+ <center><VBox spacing="12"><padding><Insets left="16"/></padding>
+  <Label text="Item type"/><ComboBox fx:id="type"/>
+  <Label text="Name"/><TextField fx:id="name" promptText="Item name"/>
+  <Label text="Description"/><TextArea fx:id="description" wrapText="true" prefRowCount="5"/>
+  <HBox spacing="8"><Button text="Create" onAction="#create"/><Button text="Update" onAction="#update"/><Button text="Delete" onAction="#delete"/><Button text="Refresh" onAction="#refresh"/></HBox>
+  <Label fx:id="message" wrapText="true"/>
+ </VBox></center>
+</BorderPane>
