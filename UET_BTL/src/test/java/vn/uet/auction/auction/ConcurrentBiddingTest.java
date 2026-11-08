@@ -1,25 +1,37 @@
 package vn.uet.auction.auction;
 
-import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.Test;
+import vn.uet.auction.model.auction.Bid;
+import vn.uet.auction.observer.AuctionEvent;
+import vn.uet.auction.persistence.ApplicationState;
+import vn.uet.auction.persistence.MemoryStateStore;
 import vn.uet.auction.service.AuctionService;
 import java.math.BigDecimal;
 import java.time.*;
 import java.util.*;
 import java.util.concurrent.*;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.locks.ReentrantLock;
 import static org.junit.jupiter.api.Assertions.*;
 
 /** TV4 hỗ trợ TV2: không sửa logic service của TV2. */
 class ConcurrentBiddingTest {
     @Test
-    @Disabled("Chờ ghép placeBid tuần 7 của TV2; review fixture quyền trước khi bật")
     void concurrentBidsKeepPriceAndHistoryConsistent() throws Exception {
         Instant now = Instant.parse("2026-11-05T00:00:00Z");
-        AuctionService service = new AuctionService(new MutableClock(now));
+        ApplicationState state = new ApplicationState();
+        ReentrantLock lock = new ReentrantLock();
+        AuctionService service = new AuctionService(new MutableClock(now), lock, state);
         // Khi nối kiểm tra quyền, seed Seller/Item/Bidder qua service TV1 dưới lock chung.
         var auction = service.createAuction(UUID.randomUUID(), UUID.randomUUID(),
                 new BigDecimal("100"), now, now.plusSeconds(60));
-        int numberOfBids = 10;
+        AtomicInteger acceptedEvents = new AtomicInteger();
+        service.addListener(event -> {
+            if (event.type() == AuctionEvent.Type.BID_ACCEPTED) {
+                acceptedEvents.incrementAndGet();
+            }
+        });
+        int numberOfBids = 32;
         ExecutorService executor = Executors.newFixedThreadPool(numberOfBids);
         CountDownLatch ready = new CountDownLatch(numberOfBids);
         CountDownLatch start = new CountDownLatch(1);
@@ -49,7 +61,7 @@ class ConcurrentBiddingTest {
                 if (result.get(5, TimeUnit.SECONDS)) { acceptedCount++; }
             }
             var snapshot = service.getAuction(auction.id()).orElseThrow();
-            assertEquals(0, new BigDecimal("110").compareTo(snapshot.currentPrice()));
+            assertEquals(0, BigDecimal.valueOf(100 + numberOfBids).compareTo(snapshot.currentPrice()));
             assertEquals(acceptedCount, snapshot.bidCount());
             BigDecimal previous = new BigDecimal("100");
             Set<UUID> bidIds = new HashSet<>();
@@ -59,6 +71,33 @@ class ConcurrentBiddingTest {
                 previous = bid.getAmount();
             }
             assertEquals(0, previous.compareTo(snapshot.currentPrice()));
+            assertEquals(acceptedCount, acceptedEvents.get());
+            Map<UUID, Bid> expectedIndex = new HashMap<>();
+            for (Bid bid : snapshot.bids()) {
+                expectedIndex.put(bid.getId(), bid);
+            }
+            assertEquals(expectedIndex, state.getBids());
+
+            assertThrows(IllegalArgumentException.class,
+                    () -> service.placeBid(auction.id(), UUID.randomUUID(), snapshot.currentPrice()));
+            assertEquals(snapshot, service.getAuction(auction.id()).orElseThrow());
+            assertEquals(expectedIndex, state.getBids());
+            assertEquals(acceptedCount, acceptedEvents.get());
+
+            MemoryStateStore store = new MemoryStateStore();
+            lock.lock();
+            try {
+                store.save(state);
+            } finally {
+                lock.unlock();
+            }
+            ApplicationState loaded = store.load();
+            assertEquals(expectedIndex, loaded.getBids());
+            assertEquals(snapshot.bids(), loaded.getAuctions().get(auction.id()).getHistory());
+            loaded.getBids().clear();
+            loaded.getAuctions().clear();
+            assertEquals(expectedIndex, store.load().getBids());
+            assertEquals(snapshot.bids(), store.load().getAuctions().get(auction.id()).getHistory());
         } finally {
             start.countDown();
             executor.shutdownNow();
