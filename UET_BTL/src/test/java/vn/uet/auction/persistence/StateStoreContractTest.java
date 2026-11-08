@@ -4,6 +4,7 @@ import org.junit.jupiter.api.Test;
 import vn.uet.auction.model.auction.*;
 import vn.uet.auction.model.item.Electronics;
 import vn.uet.auction.model.user.Bidder;
+import vn.uet.auction.security.PasswordHasher;
 import java.io.IOException;
 import java.math.BigDecimal;
 import java.time.Instant;
@@ -12,16 +13,36 @@ import static org.junit.jupiter.api.Assertions.*;
 
 /** Mỗi test có State riêng. Snapshot State đang chạy phải lấy dưới lock chung. */
 class StateStoreContractTest {
-    // Chờ code TV1: bổ sung test accounts giữ nguyên hash và active.
-    // Không tạo AccountState/UserService giả để thay phần của TV1.
-
     @Test
     void newStoreIsEmpty() throws IOException {
         ApplicationState state = new MemoryStateStore().load();
+        assertTrue(state.getAccounts().isEmpty());
         assertTrue(state.getUsers().isEmpty());
         assertTrue(state.getItems().isEmpty());
         assertTrue(state.getAuctions().isEmpty());
         assertTrue(state.getBids().isEmpty());
+    }
+
+    @Test
+    void snapshotKeepsLockedAccountAndDoesNotShareAccountMap() throws IOException {
+        ApplicationState original = createState();
+        UUID bidderId = original.getUsers().keySet().iterator().next();
+        PasswordHasher hasher = new PasswordHasher(100_000);
+        String hash = hasher.hash("MatKhauTest123");
+        original.getAccounts().put(bidderId, new AccountState(hash, false));
+
+        StateStore store = new MemoryStateStore();
+        store.save(original);
+        original.getAccounts().clear();
+
+        ApplicationState loaded = store.load();
+        AccountState account = loaded.getAccounts().get(bidderId);
+        assertNotNull(account);
+        assertFalse(account.active());
+        assertTrue(hasher.verify("MatKhauTest123", account.passwordHash()));
+
+        loaded.getAccounts().clear();
+        assertEquals(account, store.load().getAccounts().get(bidderId));
     }
 
     @Test
@@ -99,7 +120,7 @@ class StateStoreContractTest {
     }
 
     private ApplicationState createState() {
-        // Fixture model, chưa phải fixture đăng nhập: local chưa có accounts.
+        // Fixture model, không đi qua luồng đăng nhập.
         ApplicationState state = new ApplicationState();
         UUID bidderId = UUID.randomUUID();
         UUID sellerId = UUID.randomUUID();
