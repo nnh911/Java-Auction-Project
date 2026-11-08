@@ -1,8 +1,7 @@
 # Hợp đồng API — baseline sau tuần 6
 
-Cập nhật 2026-10-31 từ code nhánh tuần-6-chung (revision trước cập nhật tài liệu: 148da45). Đây là hợp đồng triển khai hiện tại để các thành viên/AI tiếp tục, không tuyên bố cả bốn người đã review hay mọi quy tắc nghiệp vụ đã được duyệt.
 
-Phần bổ sung TV1 tuần 7 ở cuối tài liệu thay thế các ghi chú "chưa có service/hash/active" đối với nhánh này.
+Cập nhật 2026-10-31 từ code nhánh tuần-6-chung (revision trước cập nhật tài liệu: 148da45). Đây là hợp đồng triển khai hiện tại để các thành viên/AI tiếp tục, không tuyên bố cả bốn người đã review hay mọi quy tắc nghiệp vụ đã được duyệt.
 
 Đọc [bàn giao tuần 6](week6-handoff.md) trước khi triển khai tuần 7. Khi đổi chữ ký, cập nhật caller, test và tài liệu trong cùng thay đổi.
 
@@ -45,7 +44,7 @@ getHistory trả bản sao không sửa được. getHighestBid trả Optional<B
 | getAuction(UUID auctionId) | Optional<AuctionSnapshot>; không tìm thấy trả empty |
 | listAuctions() | List<AuctionSnapshot> không sửa được |
 | closeDueAuctions() | List<StatusChange>; tick OPEN/RUNNING theo Clock, không đổi PAID/CANCELED |
-| placeBid(UUID auctionId, UUID bidderId, BigDecimal amount) | Khai báo trả AuctionSnapshot nhưng hiện luôn ném UnsupportedOperationException; việc tuần 7 |
+| placeBid(UUID auctionId, UUID bidderId, BigDecimal amount) | Đã triển khai lõi tuần 7; trả AuctionSnapshot sau khi cập nhật giá/history trong cùng lock. Chưa xác thực role/active; Observer đã triển khai, xem bàn giao tiếp tục bên dưới |
 
 createAuction chưa kiểm tra role/ownership Item. Hiện lỗi dùng NullPointerException/IllegalArgumentException/IllegalStateException; chưa có mapping exception nghiệp vụ hoàn chỉnh. get/list không tự tick nên trạng thái có thể cũ tới lần closeDueAuctions.
 
@@ -107,48 +106,171 @@ verify(String password,String stored): boolean; sai mật khẩu/hash sai địn
 
 Nhóm cần ghi quyết định thật cho actor/role/active, password storage, đấu giá lại, giới hạn tiền, wiring State/lock, bids map/history, command payload/result/error mapping và save failure. Không suy ra các quyết định này chỉ từ tên API.
 
+## TV2 — bàn giao tuần 7, 2026-11-02
 
-## Bổ sung TV1 tuần 7 (nhánh nnhoangt7)
+**Đã triển khai, chưa ghi nhận nhóm duyệt:** giữ nguyên chữ ký placeBid(UUID auctionId,
+UUID bidderId, BigDecimal amount), trả AuctionSnapshot. AuctionManager ủy quyền như cũ.
+Ví dụ: service.placeBid(auction.id(), authenticatedBidderId, new BigDecimal("1100000")).
+Caller phải xác thực ID/role/active; lõi hiện chỉ chặn bidderId trùng sellerId.
+Không dùng service hiện tại làm ranh giới phân quyền production.
 
-Đây là quyết định triển khai để review, chưa phải xác nhận cả nhóm đã duyệt. Giữ nguyên constructor User/Item, Factory, DTO và PasswordHasher tuần 6.
+Mọi tham số bắt buộc non-null (NullPointerException). Trong lock: tìm phiên, đọc Clock
+một lần, refresh trạng thái, chặn tự bid, kiểm tra RUNNING và amount > currentPrice,
+tạo Bid UUID và cập nhật history/giá. Không tìm thấy, tự bid, giá không tăng:
+IllegalArgumentException; phiên không RUNNING: IllegalStateException. Lỗi giá không
+thêm history; bid tại end bị từ chối nhưng trạng thái vẫn FINISHED. Tiền giữ quy tắc
+BigDecimal hiện có; chưa áp giới hạn/scale chưa được duyệt. Custom exception để tuần 8.
+History trong Auction là nơi lõi này ghi bid; chưa ghi ApplicationState.getBids().
 
-- `ApplicationState.getAccounts(): Map<UUID,AccountState>` lưu theo userId. `AccountState(passwordHash,active)` bất biến, Serializable, toString che hash. Copy constructor State sao chép cả map này; MemoryStateStore giữ được credentials/active. Không lưu password thô. Không trả AccountState qua protocol.
-- Khi tích hợp, khởi tạo `UserService(ApplicationState, ReentrantLock, PasswordHasher)`, `ItemService(ApplicationState, ReentrantLock)` và `AuctionService` với cùng một `ApplicationState` và cùng một `ReentrantLock`. `AuctionService` phải dùng map `state.getAuctions()` để `ItemService` thấy các phiên vừa tạo. Việc ghép `AuctionManager` vào State chung đang chờ TV2.
-- `register(String username,String password,Role): UserSummary`: chỉ BIDDER/SELLER; username theo model tuần 6 (strip, phân biệt hoa/thường, duy nhất); password không null/trắng, không strip trước hash.
-- `bootstrapAdmin(String,String): UserSummary`: chỉ dành cho startup tin cậy, chỉ chạy được khi chưa có Admin. TV3 không được expose thành command public. Không có password mặc định.
-- `login(String,String): UserSummary`: tên được strip; kiểm tra password và active. `listUsers(UUID actorId): List<UserSummary>` chỉ Admin đang active. DTO giữ nguyên schema, không thêm hash/active.
-- `setUserActive(UUID actorId,UUID userId,boolean): void`: Admin active; không khóa Admin active cuối cùng; user không tồn tại ném IllegalArgumentException.
-- `requireActive(UUID): UserSummary` tra lại trạng thái tài khoản trong State. `requireRole(UUID,Role): UserSummary` kiểm tra thêm role. Khi ghép dispatcher, TV3 lấy `actorId` từ session phía server và để service tra quyền trong State.
-- `createItem(UUID actorId,ItemType,String name,String description): UUID`: Seller active, Factory tuần 6.
-- `listItems(UUID actorId): List<ItemSummary>` và `getItem(UUID actorId,UUID itemId): Optional<ItemDetail>`: mọi account active được xem; không thấy trả Optional.empty; list không sửa được.
-- `updateItem(UUID actorId,UUID itemId,ItemType,String,String): void`, `deleteItem(UUID actorId,UUID itemId): void`: chỉ Seller sở hữu; chặn khi có **bất kỳ** phiên gắn Item, kể cả CANCELED, để giữ lịch sử. Update tạo Item bất biến thay thế, giữ ID/owner; validation lỗi không thay dữ liệu.
-- `requireOwnedItem(UUID actorId,UUID itemId): ItemDetail` kiểm tra tài khoản Seller đang hoạt động và sở hữu Item. Hàm này dùng để kiểm tra quyền sở hữu khi tạo phiên. Quy tắc chặn sửa/xóa Item đã có phiên nằm ở `updateItem` và `deleteItem`.
+**Đề xuất tại bàn giao đầu tiên (trạng thái mới nhất xem mục tiếp tục bên dưới):**
 
-### Bàn giao TV1 → TV2 trên nhánh chung
+- AuctionEvent(UUID auctionId, AuctionStatus from, AuctionStatus to, Instant occurredAt,
+  AuctionSnapshot snapshot, Type type); Type gồm BID_ACCEPTED, AUCTION_STARTED,
+  AUCTION_FINISHED, AUCTION_CANCELED, PAYMENT_CONFIRMED. Cần TV3 duyệt mapping
+  vì protocol hiện không có PAYMENT_CONFIRMED.
+- AuctionListener: void onAuctionEvent(AuctionEvent event).
+- AuctionService/AuctionManager: void addListener(AuctionListener listener),
+  void removeListener(AuctionListener listener). Đề xuất null bị từ chối, đăng ký trùng
+  không nhân callback; phát sau unlock, cô lập RuntimeException từng listener.
+  Bid lỗi không phát BID_ACCEPTED; refresh đóng phiên vẫn phát FINISHED dù bid bị từ chối.
+  Cần chốt thứ tự event giữa nhiều thread, reentrancy và cách báo lỗi listener.
+- AuctionSnapshot confirmPayment(UUID actorId, UUID auctionId);
+  AuctionSnapshot cancelAuction(UUID actorId, UUID auctionId). Cần duyệt winner trả tiền,
+  owner/Admin hủy OPEN/RUNNING/FINISHED, cấm hủy PAID; xác thực role/active từ nguồn
+  server tin cậy. Chưa thêm API khi chưa có quyết định này.
+- Scheduler chủ động: List<StatusChange> tick(), ủy quyền closeDueAuctions(); chưa chạy
+  thread tự động tuần 7. Cần duyệt có cần interface riêng hay dùng service hiện có.
+- TV1 cần chốt API lấy user/active và Item/owner, cùng lock dùng chung để tránh TOCTOU.
+  Không thêm fake vào src/main. TV4 cần chốt history hay State.bids làm nguồn chuẩn.
+- GUI: cần TV3 chốt gateway bất đồng bộ, dữ liệu mẫu và TV4 cung cấp JavaFX trong pom;
+  fx:id/handler là API chung chưa chốt nên chưa sửa auction.fxml/controller.
 
-TV1 bàn giao nguyên chữ ký `requireOwnedItem(UUID, UUID)` và `requireRole(UUID, Role)`. TV2 triển khai các bước dưới đây trên code đã merge của `tuần-7-chung`. TV3 dùng API public và truyền actor lấy từ session phía server.
+**Mâu thuẫn còn mở:** file-map nói ngoài TV1 đều TODO nhưng TV2 đã có code; liên kết
+week6-handoff.md không tồn tại. Javadoc placeBid cũ nói hợp đồng đã chốt và yêu cầu
+custom exceptions tuần 7, trong khi kế hoạch xếp exceptions tuần 8 và api-contract
+chưa chốt Observer/role; đã thay Javadoc trong file TV2 để phản ánh giới hạn thật.
+Chưa sửa tài liệu hay code thuộc TV1/TV3/TV4.
 
-1. **Nối State và lock.** Tại nơi khởi tạo ứng dụng, tạo một `ApplicationState` và một `ReentrantLock`, rồi truyền cùng hai đối tượng đó cho User, Item và Auction. Inject `UserService` và `ItemService` đã được tạo vào `AuctionService`. Nếu luồng tích hợp đi qua `AuctionManager`, cho manager ủy quyền tới chính instance `AuctionService` đã ghép. Mọi đường tạo phiên trong luồng tích hợp phải ghi vào `state.getAuctions()` mà `ItemService` đọc.
-2. **Tạo phiên.** Trong `createAuction`, lấy lock chung rồi gọi `itemService.requireOwnedItem(sellerId, itemId)` trước khi thêm phiên. Giữ lock đến khi ghi xong để thao tác xóa Item hoặc khóa tài khoản không xen vào giữa bước kiểm tra và bước ghi.
-3. **Đặt giá.** Trong `placeBid`, lấy lock chung rồi gọi `userService.requireRole(bidderId, Role.BIDDER)` trước khi làm mới trạng thái phiên hoặc cập nhật bid. Giữ các kiểm tra hiện có về chủ phiên, thời gian và giá. Nếu sai role hoặc tài khoản đã bị khóa, trả lỗi quyền từ helper và giữ nguyên dữ liệu phiên.
-4. **Giữ ranh giới lock và Observer.** Dispatcher và manager gọi API public mà không giữ lock. `AuctionService` giữ lock cho toàn bộ bước kiểm tra và ghi, rồi nhả lock trước khi gọi listener. Giữ chữ ký public hiện có của thao tác tạo phiên và đặt giá để TV3 nối command.
+Kiểm chứng đã chạy: `mvn -f UET_BTL/pom.xml compile test
+-Dtest=AuctionTest,AuctionServiceTest,ConcurrentBiddingTest`: BUILD SUCCESS,
+28 tests, 0 failures/errors/skipped. Máy chạy JDK 25, javac release 17 theo pom;
+chưa chạy trực tiếp trên runtime JDK 17. Chưa chạy toàn bộ suite, GUI, Socket,
+Observer hoặc integration payment/cancel service. Test model có kiểm tra markPaid/cancel,
+không đồng nghĩa đã có phân quyền pay/cancel ở service. Không đo coverage.
 
-#### Ca nghiệm thu TV1 và TV2
+## TV2 — tiếp tục W7 sau xác nhận của người dùng
 
-Dùng chung State và lock trong fixture. Tạo tài khoản qua `UserService`, tạo Item qua `ItemService` và gọi đấu giá qua cùng đường mà dispatcher sẽ dùng.
+**Đã triển khai:** người dùng yêu cầu “Tiếp tục triển khai” sau khi nhận chữ ký đề xuất.
+Đây là xác nhận trong phiên làm việc, chưa là bằng chứng cả bốn thành viên đã duyệt.
+Không đổi các chữ ký public sẵn có; thêm API TV2 đã nêu ở trên:
 
-| Ca kiểm tra | Kết quả cần thấy |
+| Kiểu | API mới đã triển khai |
 |---|---|
-| Seller đang hoạt động tạo phiên cho Item của mình | Tạo thành công. Sửa hoặc xóa Item qua `ItemService` sau đó bị chặn. |
-| Seller khác tạo phiên cho Item chưa có phiên, hoặc Seller đã khóa tạo phiên cho Item của mình | Bị từ chối quyền. Số phiên giữ nguyên. |
-| Seller đặt giá vào phiên của người khác | Bị từ chối quyền. Giá và lịch sử bid giữ nguyên, không có sự kiện `BID_ACCEPTED`. |
-| Bidder đặt giá hợp lệ, sau đó Admin khóa tài khoản và Bidder đặt tiếp | Bid đầu thành công. Bid sau bị từ chối, giá và lịch sử giữ nguyên, không có thêm `BID_ACCEPTED`. |
+| AuctionEvent | record(UUID auctionId, AuctionStatus from, AuctionStatus to, Instant occurredAt, AuctionSnapshot snapshot, Type type) |
+| AuctionEvent.Type | BID_ACCEPTED, AUCTION_STARTED, AUCTION_FINISHED, AUCTION_CANCELED, PAYMENT_CONFIRMED |
+| AuctionListener | void onAuctionEvent(AuctionEvent event) |
+| AuctionService và AuctionManager | void addListener(AuctionListener listener), void removeListener(AuctionListener listener) |
+| AuctionService và AuctionManager | AuctionSnapshot confirmPayment(UUID actorId, UUID auctionId) |
+| AuctionService và AuctionManager | AuctionSnapshot cancelAuction(UUID actorId, UUID auctionId) |
+| AuctionScheduler | interface: List<StatusChange> tick() |
 
-TV2 gửi lại commit và kết quả các ca trên để TV1 review phần quyền. Sau khi POM chính có JavaFX, chạy lại `mvn -f UET_BTL/pom.xml clean test` từ thư mục gốc repo. Việc thống nhất `getBids()` với lịch sử phiên và các quy tắc hủy/thanh toán được theo dõi riêng với TV4 và cả nhóm.
+Cách sử dụng (service là AuctionService có Clock và State riêng hoặc được inject):
 
-### Lỗi và dữ liệu tài khoản
-- Lỗi tuần 7: SecurityException cho xác thực/quyền/active; IllegalStateException cho trùng tên, Admin đã khởi tạo, khóa Admin cuối, Item có phiên; IllegalArgumentException cho dữ liệu sai/đối tượng mutation không thấy; null bắt buộc theo model/Objects.requireNonNull. Custom exception và mapping protocol thuộc tuần 8/TV3, chưa thực hiện.
-- Account cũ chỉ có User mà thiếu AccountState bị từ chối xác thực, không tự gán password/active. Fixture cần đăng ký qua service hoặc seed cả hai map dưới lock.
-- Mọi truy cập trực tiếp maps State ở nơi tích hợp đều phải giữ lock chung. Chưa có lưu file, session mạng, handler command hoặc transaction save; không coi nhánh này là đã tích hợp production.
+```java
+AuctionListener listener = event -> System.out.println(event.type());
+service.addListener(listener);
+AuctionScheduler scheduler = service::closeDueAuctions;
+scheduler.tick();
+service.placeBid(auctionId, authenticatedBidderId, new BigDecimal("1100000"));
+// Khi Clock đã tới end:
+scheduler.tick();
+service.confirmPayment(authenticatedWinnerId, auctionId);
+// Nhánh phiên chưa PAID:
+// service.cancelAuction(authenticatedOwnerId, anotherAuctionId);
+service.removeListener(listener);
+```
 
-Form Seller tuần 7 dùng `SellerController.Gateway` với dữ liệu giả qua `SellerPrototype`, chưa nối backend/mạng. `ClientApp` của TV4 giữ nguyên. Hai dependency JavaFX controls/fxml 17.0.16 trong pom chỉ để compile/chạy prototype.
+Tất cả đối số mới bắt buộc non-null (NPE). Event kiểm tra ID/status khớp snapshot
+(IAE nếu sai). Đăng ký listener trùng theo equals chỉ một lần; remove vắng mặt là no-op.
+Snapshot event chụp ngay khi cập nhật, không trả Auction mutable.
+Callback đồng bộ sau unlock; RuntimeException từng listener được log và cô lập.
+Không nuốt Error của JVM. Callback nên nhanh, không block/chạy Socket trực tiếp.
+Listener có thể đọc service, tự gỡ, hoặc gọi service lại sau unlock; thay đổi từ callback
+có thể xen vào đợt phát hiện tại. Không cam kết thứ tự callback toàn cục giữa các thread
+hay giữa thao tác tái nhập; consumer nên dùng snapshot trong event hoặc query lại.
+Không gọi public service khi caller đang giữ lock inject từ bên ngoài: callback cần lock
+được nhả hoàn toàn. Quy ước này phải được giữ khi TV4 nối snapshot/transaction.
+
+createAuction đang RUNNING phát AUCTION_STARTED; tạo OPEN không phát event.
+Tick bỏ qua nhiều mốc phát một AUCTION_FINISHED từ OPEN (giữ hành vi StatusChange cũ).
+Bid thành công phát BID_ACCEPTED, from/to đều RUNNING; tick/refresh phát sự kiện
+chuyển trạng thái trước event bid/payment. Bid lỗi không phát BID_ACCEPTED nhưng
+refresh hợp lệ trước lỗi vẫn phát STARTED/FINISHED và giữ trạng thái mới.
+
+confirmPayment: tự refresh theo Clock, chỉ ID winner được xác nhận FINISHED có bid;
+markPaid chặn trả lần nữa. Không có winner/sai actor: IAE; trả lần nữa: ISE.
+cancelAuction: chỉ owner ID; tự refresh rồi hủy OPEN/RUNNING/FINISHED,
+PAID/CANCELED bị ISE; sai owner bị IAE. Unknown ID là IAE. Kiểm tra quyền không đủ
+thay cho xác thực actor/role/active phía server. **Admin cancel chưa triển khai** vì
+không có API trusted user lookup của TV1; không thêm tham số role do client tự khai.
+
+Scheduler tuần 7 là interface và method reference, không khởi tạo background thread.
+Để tuần 9 hoàn thiện lifecycle tự động theo kế hoạch. Không sửa enum protocol TV3;
+PAYMENT_CONFIRMED hiện chỉ là event nội bộ, chờ TV3 duyệt mapping.
+
+**Phụ thuộc còn thiếu:** API role/active/Item ownership từ TV1, lock và nguồn bid chuẩn
+với TV4; gateway GUI từ TV3 và JavaFX dependency do TV4 sở hữu. AuctionController và
+auction.fxml vẫn là khung, chưa được ghi nhận hoàn thành. Không sửa pom hoặc tạo giả
+API module khác trong src/main. Chưa tuyên bố hoàn tất toàn bộ checklist W7.
+
+Kiểm chứng mới nhất: `mvn -f UET_BTL/pom.xml test` BUILD SUCCESS, **80 tests**, không
+failure/error/skipped; gồm 34 test đấu giá (6 lifecycle/Observer mới). Compile main/test
+release 17 trên JDK 25. Log cảnh báo listener lỗi là tình huống kiểm thử chủ động.
+`git diff --check` sạch. Chưa kiểm chứng runtime JDK 17, GUI/Socket/production State
+hoặc đo coverage. Kết quả 28 tests phía trên là lượt kiểm tra trước khi bổ sung Observer.
+
+## TV2 — tích hợp quyền tạo phiên và đặt giá
+
+**Đã triển khai.** Backend User/Item và accounts lấy từ `origin/nnhoangt7`
+tại `fe14aa0`. AuctionManager tạo một ApplicationState và ReentrantLock dùng chung.
+Khi gọi qua Singleton, dùng `manager.getUserService()` và
+`manager.getItemService()` để thao tác trên cùng dữ liệu với phiên đấu giá.
+
+Constructor tích hợp là
+`AuctionService(Clock, ReentrantLock, ApplicationState, UserService, ItemService)`.
+Hai service được truyền vào phải dùng cùng state và lock. Constructor cũ dành cho
+kiểm thử lõi độc lập. createAuction gọi requireOwnedItem trong lock trước khi
+ghi phiên. placeBid gọi requireRole với BIDDER trong lock trước khi refresh.
+Sai quyền hoặc account bị khóa ném SecurityException. Observer chạy sau unlock.
+
+Dispatcher gọi service tích hợp hoặc manager trực tiếp, với actor từ session tin cậy.
+CommandDispatcher trong checkout này vẫn là file khung. Đã xác minh qua service
+và manager bằng Maven, 85 test pass.
+
+## TV2 — hủy phiên và form nhập giá tuần 7
+
+**Đã triển khai.** Với service tích hợp, `cancelAuction(actorId, auctionId)`
+kiểm tra account active trong lock. Admin active hoặc Seller active sở hữu phiên
+được hủy OPEN, RUNNING hoặc FINISHED. Sai quyền ném SecurityException.
+Phiên PAID và CANCELED bị chặn theo quy tắc của Auction. Hủy thành công phát
+AUCTION_CANCELED sau unlock. Chữ ký service và manager giữ nguyên.
+
+Form `/view/auction.fxml` dùng `AuctionController`. Sau FXMLLoader.load, caller
+gọi hai API sau trên FX thread:
+
+```java
+void configure(Supplier<CompletionStage<AuctionDetail>> refresh,
+               Function<BigDecimal, CompletionStage<AuctionDetail>> placeBid)
+void dispose()
+```
+
+Caller gắn phiên và danh tính vào callback. Ví dụ khi adapter gateway của TV3
+đã sẵn sàng, truyền `() -> gateway.getAuction(auctionId)` và
+`amount -> gateway.placeBid(auctionId, amount)`. Form tự tải khi configure,
+cho làm mới thủ công và render kết quả trên FX thread. Callback phải trả stage
+ngay. Gọi dispose khi rời màn hình. Code gateway và điều hướng còn chờ ghép.
+
+Maven test đạt 86 test. Test đồng thời dùng 32 Bidder đăng ký thật với cùng
+state/lock, xác nhận giá cuối 33, lịch sử tăng nghiêm ngặt và mỗi bid được nhận
+có đúng một BID_ACCEPTED sau unlock. Đã kiểm tra tải FXML, cấu hình callback,
+nhập giá và cập nhật hiển thị bằng JavaFX với dữ liệu thử.

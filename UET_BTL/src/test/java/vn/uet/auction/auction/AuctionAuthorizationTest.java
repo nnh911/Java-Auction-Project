@@ -84,6 +84,35 @@ class AuctionAuthorizationTest {
         }
     }
 
+    @Test
+    void activeAdminCancelsAnotherSellersAuctionButCannotCancelPaidAuction() {
+        Fixture fixture = new Fixture();
+        UUID admin = fixture.users.bootstrapAdmin("admin", PASSWORD).id();
+        UUID bidder = fixture.users.register("bidder", PASSWORD, Role.BIDDER).id();
+        UUID otherSeller = fixture.users.register("other_seller", PASSWORD, Role.SELLER).id();
+        var first = fixture.create(fixture.owner);
+        var events = new ArrayList<AuctionEvent>();
+        fixture.auctions.addListener(events::add);
+        assertThrows(SecurityException.class, () -> fixture.auctions.cancelAuction(otherSeller, first.id()));
+        fixture.users.setUserActive(admin, fixture.owner, false);
+        assertThrows(SecurityException.class, () -> fixture.auctions.cancelAuction(fixture.owner, first.id()));
+        assertEquals(first, fixture.auctions.getAuction(first.id()).orElseThrow());
+        assertTrue(events.isEmpty());
+        assertEquals(vn.uet.auction.model.auction.AuctionStatus.CANCELED,
+                fixture.auctions.cancelAuction(admin, first.id()).status());
+        assertEquals(AuctionEvent.Type.AUCTION_CANCELED, assertSingleEvent(events).type());
+
+        fixture.users.setUserActive(admin, fixture.owner, true);
+        var second = fixture.create(fixture.owner);
+        fixture.auctions.placeBid(second.id(), bidder, BigDecimal.TEN);
+        fixture.clock.set(END);
+        var paid = fixture.auctions.confirmPayment(bidder, second.id());
+        int eventCount = events.size();
+        assertThrows(IllegalStateException.class, () -> fixture.auctions.cancelAuction(admin, second.id()));
+        assertEquals(paid, fixture.auctions.getAuction(second.id()).orElseThrow());
+        assertEquals(eventCount, events.size());
+    }
+
     private static AuctionEvent assertSingleEvent(ArrayList<AuctionEvent> events) {
         assertEquals(1, events.size());
         return events.get(0);

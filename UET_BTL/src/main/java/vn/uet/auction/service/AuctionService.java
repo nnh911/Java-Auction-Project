@@ -34,20 +34,6 @@ import vn.uet.auction.observer.AuctionListener;
  */
 public class AuctionService {
 
-    /** Distinguishes business rejections while preserving the existing IAE contract. */
-    public static final class Rejection extends IllegalArgumentException {
-        public enum Reason { NOT_FOUND, FORBIDDEN, INVALID_BID, CONFLICT }
-
-        private final Reason reason;
-
-        private Rejection(Reason reason, String message) {
-            super(message);
-            this.reason = reason;
-        }
-
-        public Reason reason() { return reason; }
-    }
-
     private static final System.Logger LOGGER = System.getLogger(AuctionService.class.getName());
     private final CopyOnWriteArrayList<AuctionListener> listeners = new CopyOnWriteArrayList<>();
     // Only accessed under lock. Each operation drains its events before releasing lock.
@@ -101,12 +87,7 @@ public class AuctionService {
         Objects.requireNonNull(end, "end");
         return inLock(() -> {
             if (itemService != null) {
-                try {
-                    itemService.requireOwnedItem(sellerId, itemId);
-                } catch (IllegalArgumentException e) {
-                    // With a non-null ID, this TV1 lookup uses IAE only for a missing Item.
-                    throw new Rejection(Rejection.Reason.NOT_FOUND, "Không tìm thấy Item");
-                }
+                itemService.requireOwnedItem(sellerId, itemId);
             }
             Instant now = clock.instant();
             if (!end.isAfter(now)) {
@@ -173,18 +154,18 @@ public class AuctionService {
             }
             Auction auction = auctions.get(auctionId);
             if (auction == null) {
-                throw new Rejection(Rejection.Reason.NOT_FOUND, "Không tìm thấy phiên đấu giá");
+                throw new IllegalArgumentException("Không tìm thấy phiên đấu giá");
             }
             Instant now = clock.instant();
             refresh(auction, now);
             if (auction.getSellerId().equals(bidderId)) {
-                throw new Rejection(Rejection.Reason.FORBIDDEN, "Chủ phiên không được tự đặt giá");
+                throw new IllegalArgumentException("Chủ phiên không được tự đặt giá");
             }
             if (auction.getStatus() != AuctionStatus.RUNNING) {
                 throw new IllegalStateException("Phiên không nhận đặt giá: " + auction.getStatus());
             }
             if (amount.compareTo(auction.getCurrentPrice()) <= 0) {
-                throw new Rejection(Rejection.Reason.INVALID_BID, "Giá đặt phải lớn hơn giá hiện tại");
+                throw new IllegalArgumentException("Giá đặt phải lớn hơn giá hiện tại");
             }
             auction.acceptBid(new Bid(UUID.randomUUID(), auctionId, bidderId, amount, now));
             recordEvent(auction, auction.getStatus(), now, AuctionEvent.Type.BID_ACCEPTED);
@@ -205,14 +186,11 @@ public class AuctionService {
         Objects.requireNonNull(actorId, "actorId");
         Objects.requireNonNull(auctionId, "auctionId");
         return inLock(() -> {
-            if (userService != null) userService.requireActive(actorId);
             Auction auction = requireAuction(auctionId);
             Instant now = clock.instant();
             refresh(auction, now);
             if (!auction.getWinnerId().filter(actorId::equals).isPresent()) {
-                Rejection.Reason reason = auction.getWinnerId().isPresent()
-                        ? Rejection.Reason.FORBIDDEN : Rejection.Reason.CONFLICT;
-                throw new Rejection(reason, "Chỉ người thắng được xác nhận thanh toán");
+                throw new IllegalArgumentException("Chỉ người thắng được xác nhận thanh toán");
             }
             AuctionStatus before = auction.getStatus();
             auction.markPaid();
@@ -221,15 +199,20 @@ public class AuctionService {
         });
     }
 
-    /** Owner path only; Admin authorization awaits TV1 trusted user lookup API. */
+    /** Service tích hợp cho phép Admin active hoặc Seller active sở hữu phiên hủy. */
     public AuctionSnapshot cancelAuction(UUID actorId, UUID auctionId) {
         Objects.requireNonNull(actorId, "actorId");
         Objects.requireNonNull(auctionId, "auctionId");
         return inLock(() -> {
-            if (userService != null) userService.requireActive(actorId);
             Auction auction = requireAuction(auctionId);
-            if (!auction.getSellerId().equals(actorId)) {
-                throw new Rejection(Rejection.Reason.FORBIDDEN, "Chỉ chủ phiên được hủy qua API hiện tại");
+            if (userService != null) {
+                Role role = userService.requireActive(actorId).role();
+                boolean owner = role == Role.SELLER && auction.getSellerId().equals(actorId);
+                if (role != Role.ADMIN && !owner) {
+                    throw new SecurityException("Chỉ Admin hoặc Seller chủ phiên được hủy");
+                }
+            } else if (!auction.getSellerId().equals(actorId)) {
+                throw new IllegalArgumentException("Chỉ chủ phiên được hủy trong chế độ độc lập");
             }
             Instant now = clock.instant();
             refresh(auction, now);
@@ -242,7 +225,7 @@ public class AuctionService {
 
     private Auction requireAuction(UUID id) {
         Auction auction = auctions.get(id);
-        if (auction == null) throw new Rejection(Rejection.Reason.NOT_FOUND, "Không tìm thấy phiên đấu giá");
+        if (auction == null) throw new IllegalArgumentException("Không tìm thấy phiên đấu giá");
         return auction;
     }
 
