@@ -51,6 +51,9 @@ public class AuctionService {
         public Reason reason() { return reason; }
     }
 
+    private static final BigDecimal MAX_PRICE = new BigDecimal("1000000000000");
+    private static final String PRICE_RANGE_MESSAGE = "Giá phải là số nguyên từ 1 đến " + MAX_PRICE + " VND";
+
     private static final System.Logger LOGGER = System.getLogger(AuctionService.class.getName());
     private final CopyOnWriteArrayList<AuctionListener> listeners = new CopyOnWriteArrayList<>();
     // Only accessed under lock. Each operation drains its events before releasing lock.
@@ -121,7 +124,10 @@ public class AuctionService {
             if (itemTaken) {
                 throw new IllegalStateException("Item đã có phiên đấu giá");
             }
-            Auction auction = new Auction(UUID.randomUUID(), itemId, sellerId, startingPrice, start, end);
+            if (!isValidPrice(startingPrice)) {
+                throw new IllegalArgumentException(PRICE_RANGE_MESSAGE);
+            }
+            Auction auction = new Auction(UUID.randomUUID(), itemId, sellerId, startingPrice.setScale(0), start, end);
             refresh(auction, now);
             auctions.put(auction.getId(), auction);
             return AuctionSnapshot.of(auction);
@@ -163,7 +169,7 @@ public class AuctionService {
      * Actor phải lấy từ session tin cậy. Service tích hợp kiểm tra role/active trong lock.
      * Event phát sau unlock, kể cả chuyển trạng thái trước khi bid bị từ chối.
      * Phiên không RUNNING ném AuctionClosedException trước khi kiểm tra giá.
-     * Giá không tăng ném InvalidBidException. Các lỗi quyền và not-found giữ nguyên.
+     * Giá ngoài khoảng, có phần lẻ hoặc không tăng ném InvalidBidException.
      */
     public AuctionSnapshot placeBid(UUID auctionId, UUID bidderId, BigDecimal amount) {
         Objects.requireNonNull(auctionId, "auctionId");
@@ -182,10 +188,13 @@ public class AuctionService {
             if (auction.getStatus() != AuctionStatus.RUNNING) {
                 throw new AuctionClosedException("Phiên không nhận đặt giá: " + auction.getStatus());
             }
+            if (!isValidPrice(amount)) {
+                throw new InvalidBidException(PRICE_RANGE_MESSAGE);
+            }
             if (amount.compareTo(auction.getCurrentPrice()) <= 0) {
                 throw new InvalidBidException("Giá đặt phải lớn hơn giá hiện tại");
             }
-            auction.acceptBid(new Bid(UUID.randomUUID(), auctionId, bidderId, amount, now));
+            auction.acceptBid(new Bid(UUID.randomUUID(), auctionId, bidderId, amount.setScale(0), now));
             recordEvent(auction, auction.getStatus(), now, AuctionEvent.Type.BID_ACCEPTED);
             return AuctionSnapshot.of(auction);
         });
@@ -244,6 +253,11 @@ public class AuctionService {
             recordEvent(auction, before, now, AuctionEvent.Type.AUCTION_CANCELED);
             return AuctionSnapshot.of(auction);
         });
+    }
+
+    private static boolean isValidPrice(BigDecimal price) {
+        return price.signum() > 0 && price.compareTo(MAX_PRICE) <= 0
+                && price.stripTrailingZeros().scale() <= 0;
     }
 
     private Auction requireAuction(UUID id) {

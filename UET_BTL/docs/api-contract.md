@@ -274,3 +274,19 @@ Maven test đạt 86 test. Test đồng thời dùng 32 Bidder đăng ký thật
 state/lock, xác nhận giá cuối 33, lịch sử tăng nghiêm ngặt và mỗi bid được nhận
 có đúng một BID_ACCEPTED sau unlock. Đã kiểm tra tải FXML, cấu hình callback,
 nhập giá và cập nhật hiển thị bằng JavaFX với dữ liệu thử.
+
+## TV2 — quy tắc giá VND tuần 8
+
+**Đã chốt và triển khai ngày 2026-11-09.** Giá khởi điểm và giá đặt phải là số
+nguyên trong khoảng từ 1 đến 1.000.000.000.000 VND, gồm cả hai đầu. Service
+nhận 1000.00 vì giá trị bằng 1000 và lưu dưới dạng BigDecimal có scale = 0.
+Giá có phần lẻ thực sự bị từ chối. Bid phải lớn hơn giá hiện tại, kể cả bid
+đầu tiên, nên mức tăng tối thiểu là 1 VND.
+
+Giá khởi điểm sai ném IllegalArgumentException (INVALID_REQUEST). Trong
+placeBid, thứ tự kiểm tra tham số, quyền, phiên tồn tại, chủ phiên và trạng
+thái giữ nguyên. Với phiên RUNNING, giá có phần lẻ, ngoài khoảng hoặc không
+tăng ném InvalidBidException (INVALID_BID). Phiên không RUNNING ném
+AuctionClosedException (AUCTION_CLOSED) trước khi kiểm tra giá, kể cả tại
+đúng end. Bid bị từ chối không đổi giá, không thêm history hay BID_ACCEPTED.
+Refresh tại end vẫn có thể phát AUCTION_FINISHED.
