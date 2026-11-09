@@ -6,6 +6,7 @@ import java.math.BigDecimal;
 import org.junit.jupiter.api.Test;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.locks.ReentrantLock;
 import vn.uet.auction.auction.MutableClock;
@@ -76,6 +77,7 @@ public final class DispatcherSmokeTest {
         check(send(seller, Command.LOGIN, new LoginPayload("seller_demo", "password")).success());
         error(send(seller, Command.LOGIN, new LoginPayload("seller_demo", "wrong")), ErrorCode.AUTHENTICATION_FAILED);
         check(!seller.isAuthenticated());
+        error(send(seller, Command.LOGIN, new LoginPayload(" ", "password")), ErrorCode.AUTHENTICATION_FAILED);
         check(send(seller, Command.LOGIN, new LoginPayload("seller_demo", "password")).success());
         error(send(seller, Command.LOGIN, new EmptyPayload()), ErrorCode.INVALID_REQUEST);
         error(send(seller, Command.LIST_ITEMS, new EmptyPayload()), ErrorCode.UNAUTHENTICATED);
@@ -93,8 +95,12 @@ public final class DispatcherSmokeTest {
         error(send(seller, Command.DELETE_ITEM, new ItemIdPayload(item)), ErrorCode.NOT_FOUND);
         send(admin, Command.LOGIN, new LoginPayload("admin_demo", "password"));
         check(send(admin, Command.LIST_USERS, new EmptyPayload()).data() instanceof ListResult<?>);
+        error(send(admin, Command.SET_USER_ACTIVE, new SetUserActivePayload(UUID.randomUUID(), false)),
+                ErrorCode.NOT_FOUND);
         check(send(admin, Command.SET_USER_ACTIVE, new SetUserActivePayload(sellerId, false)).success());
         error(send(seller, Command.LIST_ITEMS, new EmptyPayload()), ErrorCode.FORBIDDEN);
+        error(send(new Session(), Command.LOGIN, new LoginPayload("seller_demo", "password")),
+                ErrorCode.AUTHENTICATION_FAILED);
         check(state.getItems().isEmpty());
         check(send(admin, Command.SET_USER_ACTIVE, new SetUserActivePayload(sellerId, true)).success());
         verifyAuctionFlow(seller, other, admin, auctions, lock, clock);
@@ -135,6 +141,12 @@ public final class DispatcherSmokeTest {
         check(send(admin, Command.SET_USER_ACTIVE, new SetUserActivePayload(registered.id(), false)).success());
         error(send(bidder, Command.PLACE_BID, bid), ErrorCode.FORBIDDEN);
         check(send(admin, Command.SET_USER_ACTIVE, new SetUserActivePayload(registered.id(), true)).success());
+        lock.lock();
+        try {
+            error(send(bidder, Command.PLACE_BID, bid), ErrorCode.CONFLICT);
+        } finally {
+            lock.unlock();
+        }
         var updated = (AuctionDetail) send(bidder, Command.PLACE_BID, bid).data();
         check(updated.history().size() == 1 && updated.history().get(0).bidderId().equals(registered.id()));
         check(updated.equals(send(bidder, Command.GET_AUCTION, auctionId).data()));
@@ -153,6 +165,16 @@ public final class DispatcherSmokeTest {
         check(send(bidder, Command.PLACE_BID,
                 new PlaceBidPayload(payable.id(), bid.amount())).success());
         clock.set(create.endTime());
+        var payableId = new AuctionIdPayload(payable.id());
+        int eventsBeforeClosedBid = events.size();
+        error(send(bidder, Command.PLACE_BID, new PlaceBidPayload(payable.id(), bid.amount())),
+                ErrorCode.AUCTION_CLOSED);
+        var finished = (AuctionDetail) send(bidder, Command.GET_AUCTION, payableId).data();
+        assertEquals(AuctionStatus.FINISHED, finished.status());
+        assertEquals(bid.amount(), finished.currentPrice());
+        assertEquals(1, finished.history().size());
+        assertEquals(List.of(new EventMessage(EventMessage.EventType.AUCTION_FINISHED,
+                payable.id(), create.endTime())), events.subList(eventsBeforeClosedBid, events.size()));
         var paid = (AuctionDetail) send(bidder, Command.CONFIRM_PAYMENT,
                 new AuctionIdPayload(payable.id())).data();
         assertEquals(AuctionStatus.PAID, paid.status());

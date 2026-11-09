@@ -55,7 +55,7 @@ AuctionSnapshot record gồm id,itemId,sellerId,startingPrice,currentPrice,start
 ## TV3 — protocol v1, bàn giao tuần 8
 
 **Đã triển khai.** Bảng dưới đây mô tả dispatcher tại bản tích hợp tuần 7 và cập nhật
-kiểm tra payload/session tuần 8. Chưa ghi nhận nhóm duyệt đóng băng schema.
+kiểm tra payload/session và ánh xạ ngoại lệ tuần 8. Chưa ghi nhận nhóm duyệt đóng băng schema.
 Mục TV3 ở baseline tuần 6 và các ghi chú lịch sử về dispatcher trong phần TV2
 phản ánh checkout cũ. Protocol v1 là tên schema tài liệu, chưa có trường version.
 
@@ -89,13 +89,13 @@ và message rỗng. Lỗi có data null và message bằng tên ErrorCode khi đ
 | Trường hợp | ErrorCode |
 |---|---|
 | Sai kiểu payload hoặc service từ chối tham số bằng IllegalArgumentException thông thường | INVALID_REQUEST |
-| LOGIN bị từ chối bằng SecurityException | AUTHENTICATION_FAILED |
+| LOGIN bị từ chối bằng AuthenticationException | AUTHENTICATION_FAILED |
 | Command cần đăng nhập nhưng session trống | UNAUTHENTICATED |
 | Sai quyền, tài khoản bị khóa trong thao tác cần đăng nhập hoặc Rejection.FORBIDDEN | FORBIDDEN |
 | Không tìm thấy mục tiêu được kiểm tra trong dispatcher hoặc Rejection.NOT_FOUND | NOT_FOUND |
-| Rejection.INVALID_BID | INVALID_BID |
-| IllegalStateException trong PLACE_BID | AUCTION_CLOSED |
-| IllegalStateException ở command khác hoặc Rejection.CONFLICT | CONFLICT |
+| InvalidBidException qua Rejection.Reason.INVALID_BID | INVALID_BID |
+| AuctionClosedException | AUCTION_CLOSED |
+| IllegalStateException khác hoặc Rejection.CONFLICT | CONFLICT |
 | Dispatcher được khởi tạo thiếu AuctionService khi gọi command đấu giá bằng session hợp lệ | UNSUPPORTED_COMMAND |
 | RuntimeException khác, gồm NullPointerException nội bộ | INTERNAL_ERROR |
 
@@ -126,17 +126,38 @@ Kiểm tra ObjectStream tuần 8 dùng byte array trong test. Command null bị 
 khi dựng Request. Tên enum không nhận diện được trên stream thuộc tầng đọc dữ liệu
 tuần 9, trước khi dispatcher có Request để giữ requestId.
 
-**Đề xuất để nhóm duyệt.** Sau khi TV1/TV2 chốt exception, ánh xạ lỗi xác thực,
-giá bid và phiên đóng sang AUTHENTICATION_FAILED, INVALID_BID và AUCTION_CLOSED.
-Giữ nguyên chữ ký `Response<? extends Serializable> dispatch(Session session, Request request)`.
-Chữ ký constructor đề xuất cho chủ file xem xét là
-`public AuthenticationException(String message)` (TV1),
-`public InvalidBidException(String message)` và
-`public AuctionClosedException(String message)` (TV2).
-Cần chốt lớp cha, checked/unchecked, điều kiện ném và thứ tự ưu tiên nếu request
-vi phạm nhiều điều kiện. Mapping
-IllegalStateException của PLACE_BID hiện còn gom cả lỗi trạng thái nội bộ của
-service. Cần nhóm xác nhận các kiểu danh sách hiện có trước khi đóng băng schema.
+**Đã triển khai theo bàn giao TV1/TV2.** Giữ nguyên chữ ký
+`Response<? extends Serializable> dispatch(Session session, Request request)`.
+Ngoại lệ trong `vn.uet.auction.exception` đều unchecked, với constructor public
+nhận `String message`.
+
+| Chủ file và commit | Ngoại lệ | Lớp cha trực tiếp |
+|---|---|---|
+| TV1, `0244c15` | AuthenticationException | SecurityException |
+| TV2, `dc69b96` | InvalidBidException | AuctionService.Rejection, reason INVALID_BID |
+| TV2, `dc69b96` | AuctionClosedException | IllegalStateException |
+
+LOGIN trả AUTHENTICATION_FAILED cho credentials sai, trắng, user vắng mặt, thiếu
+account hoặc account khóa. Request cần đăng nhập từ session đã bị khóa trả
+FORBIDDEN. SET_USER_ACTIVE với userId vắng mặt trả NOT_FOUND. Nếu có User nhưng
+thiếu AccountState, service hiện trả IllegalArgumentException và dispatcher giữ
+INVALID_REQUEST. Cần TV1 chốt nếu muốn thống nhất hai trường hợp thiếu dữ liệu.
+
+Trong service tích hợp, thứ tự xử lý PLACE_BID là kiểm tra tham số, role/active,
+tìm phiên, cập nhật theo Clock, chặn chủ phiên, kiểm tra phiên RUNNING rồi kiểm tra
+giá tăng. Giá bằng giá hiện tại đúng lúc end trả AUCTION_CLOSED. Nếu phiên chuyển
+FINISHED trong lần gọi đó, Observer vẫn phát AUCTION_FINISHED sau unlock, còn giá
+và lịch sử bid giữ nguyên.
+
+**Chờ nhóm duyệt schema v1.** Bảng giữ kiểu danh sách hiện hành. Cần nhóm xác nhận
+giữ các kiểu đó hay thống nhất qua một thay đổi có cập nhật caller. Kết quả build
+TV4 tại `9f3c12b` thuộc nhánh TV4. Việc ghép TV4 cần phối hợp với TV2 vì cả hai
+nhánh sửa AuctionService và test đấu giá, gồm cập nhật chỉ mục bid của TV4.
+
+**Kiểm chứng TV3 ngày 2026-11-09.** `mvn -f UET_BTL/pom.xml clean test`
+trên `hthinht8` tại merge `daf3791` cùng thay đổi mapping/test TV3, dùng Maven
+3.9.16 và JDK 25.0.4.1, compile release 17. Kết quả BUILD SUCCESS, 111 test,
+0 failure, 0 error, 0 skipped. Chưa đo JaCoCo cho bản ghép này.
 
 ## TV4 — StateStore và password
 
