@@ -5,6 +5,7 @@ import java.util.Objects;
 import java.util.UUID;
 import java.util.concurrent.locks.ReentrantLock;
 import java.util.function.Supplier;
+import vn.uet.auction.exception.AuthenticationException;
 import vn.uet.auction.model.user.*;
 import vn.uet.auction.persistence.AccountState;
 import vn.uet.auction.persistence.ApplicationState;
@@ -51,12 +52,16 @@ public final class UserService {
     }
 
     public UserSummary login(String username, String password) {
+        if (username == null || username.isBlank() || password == null || password.isBlank()) {
+            throw new AuthenticationException("Invalid credentials or inactive account");
+        }
+        String normalized = username.strip();
         return inLock(() -> {
             User user = state.getUsers().values().stream()
-                    .filter(u -> username != null && u.getUsername().equals(username.strip())).findFirst().orElse(null);
+                    .filter(u -> u.getUsername().equals(normalized)).findFirst().orElse(null);
             AccountState account = user == null ? null : state.getAccounts().get(user.getId());
             if (account == null || !account.active() || !hasher.verify(password, account.passwordHash()))
-                throw new SecurityException("Invalid credentials or inactive account");
+                throw new AuthenticationException("Invalid credentials or inactive account");
             return summary(user);
         });
     }

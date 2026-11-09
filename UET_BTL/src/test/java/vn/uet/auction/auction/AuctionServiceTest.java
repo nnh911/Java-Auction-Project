@@ -9,6 +9,8 @@ import java.util.List;
 import java.util.UUID;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import vn.uet.auction.exception.AuctionClosedException;
+import vn.uet.auction.exception.InvalidBidException;
 import vn.uet.auction.model.auction.AuctionStatus;
 import vn.uet.auction.service.AuctionService;
 import vn.uet.auction.service.AuctionSnapshot;
@@ -161,7 +163,7 @@ class AuctionServiceTest {
         assertEquals(0, a.bidCount());
         assertTrue(accepted.winner().isEmpty());
         clock.set(END);
-        assertThrows(IllegalStateException.class,
+        assertThrows(AuctionClosedException.class,
                 () -> service.placeBid(a.id(), bidder, PRICE.add(BigDecimal.TEN)));
         AuctionSnapshot finished = service.getAuction(a.id()).orElseThrow();
         assertEquals(AuctionStatus.FINISHED, finished.status());
@@ -173,11 +175,11 @@ class AuctionServiceTest {
     void rejectedBidsDoNotChangePriceOrHistory() {
         AuctionSnapshot a = create();
         UUID bidder = UUID.randomUUID();
-        assertThrows(IllegalStateException.class, () -> service.placeBid(a.id(), bidder, PRICE));
+        assertThrows(AuctionClosedException.class, () -> service.placeBid(a.id(), bidder, PRICE));
         clock.set(START);
         assertThrows(IllegalArgumentException.class, () -> service.placeBid(a.id(), seller, PRICE));
-        assertThrows(IllegalArgumentException.class, () -> service.placeBid(a.id(), bidder, PRICE));
-        assertThrows(IllegalArgumentException.class,
+        assertThrows(InvalidBidException.class, () -> service.placeBid(a.id(), bidder, PRICE));
+        assertThrows(InvalidBidException.class,
                 () -> service.placeBid(a.id(), bidder, BigDecimal.ZERO));
         assertThrows(NullPointerException.class, () -> service.placeBid(a.id(), bidder, null));
         assertThrows(IllegalArgumentException.class,

@@ -10,6 +10,7 @@ import java.util.UUID;
 import java.util.concurrent.*;
 import java.util.concurrent.locks.ReentrantLock;
 import org.junit.jupiter.api.Test;
+import vn.uet.auction.exception.InvalidBidException;
 import vn.uet.auction.model.item.ItemType;
 import vn.uet.auction.model.user.Role;
 import vn.uet.auction.observer.AuctionEvent;
@@ -55,7 +56,7 @@ class ConcurrentBiddingTest {
                     try {
                         service.placeBid(auction.id(), bidder, amount);
                         return true;
-                    } catch (IllegalArgumentException rejectedLowerBid) {
+                    } catch (InvalidBidException rejectedLowerBid) {
                         return false;
                     }
                 }));
