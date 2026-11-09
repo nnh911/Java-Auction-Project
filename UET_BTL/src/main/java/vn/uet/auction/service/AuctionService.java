@@ -13,6 +13,8 @@ import java.util.UUID;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.locks.ReentrantLock;
 import java.util.function.Supplier;
+import vn.uet.auction.exception.AuctionClosedException;
+import vn.uet.auction.exception.InvalidBidException;
 import vn.uet.auction.model.auction.Auction;
 import vn.uet.auction.model.auction.AuctionStatus;
 import vn.uet.auction.model.auction.Bid;
@@ -35,12 +37,13 @@ import vn.uet.auction.observer.AuctionListener;
 public class AuctionService {
 
     /** Distinguishes business rejections while preserving the existing argument exception contract. */
-    public static final class Rejection extends IllegalArgumentException {
+    public static class Rejection extends IllegalArgumentException {
+        private static final long serialVersionUID = 1L;
         public enum Reason { NOT_FOUND, FORBIDDEN, INVALID_BID, CONFLICT }
 
         private final Reason reason;
 
-        private Rejection(Reason reason, String message) {
+        protected Rejection(Reason reason, String message) {
             super(message);
             this.reason = reason;
         }
@@ -146,10 +149,9 @@ public class AuctionService {
             Instant now = clock.instant();
             List<StatusChange> changes = new ArrayList<>();
             for (Auction a : auctions.values()) {
-                AuctionStatus before = a.getStatus();
-                refresh(a, now);
-                if (a.getStatus() != before) {
-                    changes.add(new StatusChange(a.getId(), before, a.getStatus(), now));
+                StatusChange change = refresh(a, now);
+                if (change != null) {
+                    changes.add(change);
                 }
             }
             return List.copyOf(changes);
@@ -160,8 +162,8 @@ public class AuctionService {
      * Lõi đặt giá tuần 7: đọc giờ, kiểm tra và cập nhật trong cùng lock.
      * Actor phải lấy từ session tin cậy. Service tích hợp kiểm tra role/active trong lock.
      * Event phát sau unlock, kể cả chuyển trạng thái trước khi bid bị từ chối.
-     * Lỗi tạm thời: null -> NPE, không tìm thấy/giá sai/tự bid -> IAE,
-     * phiên không RUNNING -> ISE. Custom exceptions thuộc tuần 8.
+     * Phiên không RUNNING ném AuctionClosedException trước khi kiểm tra giá.
+     * Giá không tăng ném InvalidBidException. Các lỗi quyền và not-found giữ nguyên.
      */
     public AuctionSnapshot placeBid(UUID auctionId, UUID bidderId, BigDecimal amount) {
         Objects.requireNonNull(auctionId, "auctionId");
@@ -178,10 +180,10 @@ public class AuctionService {
                 throw new Rejection(Rejection.Reason.FORBIDDEN, "Chủ phiên không được tự đặt giá");
             }
             if (auction.getStatus() != AuctionStatus.RUNNING) {
-                throw new IllegalStateException("Phiên không nhận đặt giá: " + auction.getStatus());
+                throw new AuctionClosedException("Phiên không nhận đặt giá: " + auction.getStatus());
             }
             if (amount.compareTo(auction.getCurrentPrice()) <= 0) {
-                throw new Rejection(Rejection.Reason.INVALID_BID, "Giá đặt phải lớn hơn giá hiện tại");
+                throw new InvalidBidException("Giá đặt phải lớn hơn giá hiện tại");
             }
             auction.acceptBid(new Bid(UUID.randomUUID(), auctionId, bidderId, amount, now));
             recordEvent(auction, auction.getStatus(), now, AuctionEvent.Type.BID_ACCEPTED);
@@ -250,13 +252,16 @@ public class AuctionService {
         return auction;
     }
 
-    private void refresh(Auction auction, Instant now) {
+    private StatusChange refresh(Auction auction, Instant now) {
         AuctionStatus before = auction.getStatus();
         auction.refreshStatus(now);
-        if (before != auction.getStatus()) {
-            recordEvent(auction, before, now, auction.getStatus() == AuctionStatus.RUNNING
-                    ? AuctionEvent.Type.AUCTION_STARTED : AuctionEvent.Type.AUCTION_FINISHED);
+        AuctionStatus after = auction.getStatus();
+        if (before == after) {
+            return null;
         }
+        recordEvent(auction, before, now, after == AuctionStatus.RUNNING
+                ? AuctionEvent.Type.AUCTION_STARTED : AuctionEvent.Type.AUCTION_FINISHED);
+        return new StatusChange(auction.getId(), before, after, now);
     }
 
     private void recordEvent(Auction auction, AuctionStatus before, Instant now, AuctionEvent.Type type) {
