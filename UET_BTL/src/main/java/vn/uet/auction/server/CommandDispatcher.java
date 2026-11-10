@@ -5,6 +5,8 @@ import java.util.ArrayList;
 import java.util.Objects;
 import java.util.UUID;
 import java.util.concurrent.locks.ReentrantLock;
+import vn.uet.auction.exception.AuctionClosedException;
+import vn.uet.auction.exception.AuthenticationException;
 import vn.uet.auction.protocol.*;
 import vn.uet.auction.protocol.Request.*;
 import vn.uet.auction.protocol.dto.*;
@@ -37,17 +39,19 @@ public final class CommandDispatcher {
     public Response<? extends Serializable> dispatch(Session session, Request request) {
         Objects.requireNonNull(session);
         Objects.requireNonNull(request);
-        if (!validPayload(request)) return fail(request, ErrorCode.INVALID_REQUEST);
         switch (request.command()) {
             case CREATE_AUCTION, LIST_AUCTIONS, GET_AUCTION, PLACE_BID, CONFIRM_PAYMENT, CANCEL_AUCTION:
-                return dispatchAuction(session, request);
+                return validPayload(request)
+                        ? dispatchAuction(session, request)
+                        : fail(request, ErrorCode.INVALID_REQUEST);
             default:
                 break;
         }
         lock.lock();
         try {
+            if (request.command() == Command.LOGIN) session.clear();
+            if (!validPayload(request)) return fail(request, ErrorCode.INVALID_REQUEST);
             if (request.command() == Command.LOGIN) {
-                session.clear();
                 LoginPayload p = (LoginPayload) request.payload();
                 UserSummary user = users.login(p.username(), p.password());
                 session.bind(user);
@@ -94,10 +98,11 @@ public final class CommandDispatcher {
                 default -> { return fail(request, ErrorCode.UNSUPPORTED_COMMAND); }
             }
             return Response.ok(request.requestId(), result);
+        } catch (AuthenticationException e) {
+            return fail(request, ErrorCode.AUTHENTICATION_FAILED);
         } catch (SecurityException e) {
-            return fail(request, request.command() == Command.LOGIN
-                    ? ErrorCode.AUTHENTICATION_FAILED : ErrorCode.FORBIDDEN);
-        } catch (IllegalArgumentException | NullPointerException e) {
+            return fail(request, ErrorCode.FORBIDDEN);
+        } catch (IllegalArgumentException e) {
             return fail(request, ErrorCode.INVALID_REQUEST);
         } catch (IllegalStateException e) {
             return fail(request, ErrorCode.CONFLICT);
@@ -153,9 +158,10 @@ public final class CommandDispatcher {
             return fail(request, ErrorCode.FORBIDDEN);
         } catch (IllegalArgumentException e) {
             return fail(request, ErrorCode.INVALID_REQUEST);
+        } catch (AuctionClosedException e) {
+            return fail(request, ErrorCode.AUCTION_CLOSED);
         } catch (IllegalStateException e) {
-            return fail(request, request.command() == Command.PLACE_BID
-                    ? ErrorCode.AUCTION_CLOSED : ErrorCode.CONFLICT);
+            return fail(request, ErrorCode.CONFLICT);
         } catch (RuntimeException e) {
             return fail(request, ErrorCode.INTERNAL_ERROR);
         }
