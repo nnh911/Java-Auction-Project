@@ -1,6 +1,18 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<!--
-  FILE KHUNG: register. Phụ trách: Thành viên 4. Tuần 7–10.
-  TODO: Nhóm tự thiết kế layout bằng JavaFX/SceneBuilder, khai báo controller,
-  fx:id và event handler sau khi chốt hợp đồng. Chưa có root/layout để tải FXML.
--->
+<?import javafx.geometry.Insets?>
+<?import javafx.scene.control.*?>
+<?import javafx.scene.layout.VBox?>
+
+<VBox spacing="12" xmlns:fx="http://javafx.com/fxml/1"
+      fx:controller="vn.uet.auction.client.controller.RegisterController">
+    <padding><Insets top="24" right="24" bottom="24" left="24"/></padding>
+    <Label text="ĐĂNG KÝ MẪU"/>
+    <TextField fx:id="usernameField" promptText="Tên đăng nhập"/>
+    <PasswordField fx:id="passwordField" promptText="Mật khẩu"/>
+    <PasswordField fx:id="confirmField" promptText="Nhập lại mật khẩu"/>
+    <ComboBox fx:id="roleBox"/>
+    <Button text="Đăng ký" onAction="#submit" defaultButton="true"/>
+    <Button text="Quay lại đăng nhập" onAction="#navigate"/>
+    <Label fx:id="messageLabel" wrapText="true"
+           text="Form mẫu chưa lưu tài khoản."/>
+</VBox>

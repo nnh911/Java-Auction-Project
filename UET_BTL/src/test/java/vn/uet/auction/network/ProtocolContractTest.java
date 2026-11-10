@@ -35,6 +35,11 @@ import vn.uet.auction.protocol.Command;
 import vn.uet.auction.protocol.ErrorCode;
 import vn.uet.auction.protocol.EventMessage;
 import vn.uet.auction.protocol.Request;
+import vn.uet.auction.protocol.Request.AuctionIdPayload;
+import vn.uet.auction.protocol.Request.ItemIdPayload;
+import vn.uet.auction.protocol.Request.RegisterPayload;
+import vn.uet.auction.protocol.Request.SetUserActivePayload;
+import vn.uet.auction.protocol.Request.UpdateItemPayload;
 import vn.uet.auction.protocol.Request.CreateAuctionPayload;
 import vn.uet.auction.protocol.Request.CreateItemPayload;
 import vn.uet.auction.protocol.Request.LoginPayload;
@@ -47,15 +52,7 @@ import vn.uet.auction.protocol.dto.ItemDetail;
 import vn.uet.auction.protocol.dto.ItemSummary;
 import vn.uet.auction.protocol.dto.UserSummary;
 
-/**
- * Kiểm thử hợp đồng package {@code vn.uet.auction.protocol} (TV3, tuần 6).
- *
- * <p>Mỗi lớp @Nested kiểm thử đúng một file. Chỉ khẳng định hành vi code hiện có và
- * các điều kiện ghi trong kế hoạch mục 3.4; api-contract.md còn TODO nên những quy tắc
- * chưa được nhóm duyệt (độ dài tên, giá > 0, start < end...) KHÔNG được khẳng định ở đây.
- *
- * <p>Role/ItemType do TV1 sở hữu nên test dùng {@code values()[0]} thay vì gọi tên hằng.
- */
+/** Kiểm thử record, validation và serialization của protocol v1. */
 class ProtocolContractTest {
 
     private static final UUID ID_A = UUID.fromString("00000000-0000-0000-0000-00000000000a");
@@ -196,6 +193,28 @@ class ProtocolContractTest {
         void loginPayloadRejectsNullFields() {
             assertNpe(() -> new LoginPayload(null, SECRET));
             assertNpe(() -> new LoginPayload("alice", null));
+        }
+
+        @Test
+        void additionalPayloadsRejectMissingRequiredFields() {
+            assertNpe(() -> new RegisterPayload(null, SECRET, Role.BIDDER));
+            assertNpe(() -> new RegisterPayload("alice", null, Role.BIDDER));
+            assertNpe(() -> new RegisterPayload("alice", SECRET, null));
+            assertNpe(() -> new SetUserActivePayload(null, false));
+            assertNpe(() -> new ItemIdPayload(null));
+            assertNpe(() -> new UpdateItemPayload(null, ItemType.ART, "Art", ""));
+            assertNpe(() -> new UpdateItemPayload(ID_A, null, "Art", ""));
+            assertNpe(() -> new UpdateItemPayload(ID_A, ItemType.ART, null, ""));
+            assertNpe(() -> new UpdateItemPayload(ID_A, ItemType.ART, "Art", null));
+            assertNpe(() -> new AuctionIdPayload(null));
+        }
+
+        @Test
+        void registerPayloadAndRequestNeverPrintPassword() {
+            var payload = new RegisterPayload("alice", SECRET, Role.BIDDER);
+            assertFalse(payload.toString().contains(SECRET));
+            var request = new Request(ID_A, Command.REGISTER, payload);
+            assertFalse(request.toString().contains(SECRET));
         }
 
         @Test

@@ -5,6 +5,7 @@ import static org.junit.jupiter.api.Assertions.*;
 import java.util.UUID;
 import java.util.concurrent.*;
 import java.util.concurrent.locks.ReentrantLock;
+import vn.uet.auction.exception.AuthenticationException;
 import vn.uet.auction.model.user.Role;
 import vn.uet.auction.persistence.*;
 import vn.uet.auction.security.PasswordHasher;
@@ -21,12 +22,27 @@ class UserServiceTest {
         assertEquals("hoang", seller.username());
         assertNotEquals("secret", state.getAccounts().get(seller.id()).passwordHash());
         assertFalse(state.getAccounts().get(seller.id()).toString().contains("pbkdf2"));
-        assertThrows(SecurityException.class, () -> users.login("hoang", "wrong"));
-        assertThrows(SecurityException.class, () -> users.login(null, null));
+        assertThrows(AuthenticationException.class, () -> users.login("hoang", "wrong"));
+        assertThrows(AuthenticationException.class, () -> users.login(null, null));
         assertThrows(IllegalStateException.class, () -> users.register("hoang", "other", Role.BIDDER));
         assertThrows(SecurityException.class, () -> users.register("admin", "secret", Role.ADMIN));
         assertThrows(IllegalArgumentException.class, () -> users.register("new_user", " ", Role.BIDDER));
         assertEquals(1, state.getUsers().size());
+    }
+
+    @Test void validatesUsernameAndPasswordAtBoundaries() {
+        for (String invalid : new String[]{"", "  ", "ab", "a".repeat(31), "bad-name"}) {
+            assertThrows(IllegalArgumentException.class, () -> users.register(invalid, "secret", Role.BIDDER));
+        }
+        assertThrows(NullPointerException.class, () -> users.register(null, "secret", Role.BIDDER));
+        assertThrows(NullPointerException.class, () -> users.register("valid", "secret", null));
+        assertThrows(IllegalArgumentException.class, () -> users.register("valid", null, Role.BIDDER));
+        assertThrows(IllegalArgumentException.class, () -> users.register("valid", "", Role.BIDDER));
+        assertTrue(state.getAccounts().isEmpty());
+        var shortest = users.register("abc", " secret ", Role.BIDDER);
+        assertEquals(shortest, users.login("abc", " secret "));
+        assertThrows(AuthenticationException.class, () -> users.login("abc", "secret"));
+        assertEquals(30, users.register("x".repeat(30), "secret", Role.SELLER).username().length());
     }
 
     @Test void adminAndInactiveAccounts() {

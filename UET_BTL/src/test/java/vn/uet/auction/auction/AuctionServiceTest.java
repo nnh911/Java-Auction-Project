@@ -1,3 +1,9 @@
+// FILE KIỂM THỬ KHUNG — CHƯA CÓ TEST CHẠY ĐƯỢC.
+// Phụ trách: Thành viên 2. Tuần học kỳ: 8–12.
+// Package dự kiến: vn.uet.auction.auction
+// Kịch bản cần tự viết: Tạo phiên, bid đúng/sai, payment/cancel, snapshot kết quả.
+// TODO: Tự khai báo package/class, JUnit test, fixture và assertion.
+// Chưa có kết quả PASS hoặc coverage cho dự án khung này.
 package vn.uet.auction.auction;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -9,6 +15,8 @@ import java.util.List;
 import java.util.UUID;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import vn.uet.auction.exception.AuctionClosedException;
+import vn.uet.auction.exception.InvalidBidException;
 import vn.uet.auction.model.auction.AuctionStatus;
 import vn.uet.auction.service.AuctionService;
 import vn.uet.auction.service.AuctionSnapshot;
@@ -161,7 +169,7 @@ class AuctionServiceTest {
         assertEquals(0, a.bidCount());
         assertTrue(accepted.winner().isEmpty());
         clock.set(END);
-        assertThrows(IllegalStateException.class,
+        assertThrows(AuctionClosedException.class,
                 () -> service.placeBid(a.id(), bidder, PRICE.add(BigDecimal.TEN)));
         AuctionSnapshot finished = service.getAuction(a.id()).orElseThrow();
         assertEquals(AuctionStatus.FINISHED, finished.status());
@@ -173,11 +181,11 @@ class AuctionServiceTest {
     void rejectedBidsDoNotChangePriceOrHistory() {
         AuctionSnapshot a = create();
         UUID bidder = UUID.randomUUID();
-        assertThrows(IllegalStateException.class, () -> service.placeBid(a.id(), bidder, PRICE));
+        assertThrows(AuctionClosedException.class, () -> service.placeBid(a.id(), bidder, PRICE));
         clock.set(START);
         assertThrows(IllegalArgumentException.class, () -> service.placeBid(a.id(), seller, PRICE));
-        assertThrows(IllegalArgumentException.class, () -> service.placeBid(a.id(), bidder, PRICE));
-        assertThrows(IllegalArgumentException.class,
+        assertThrows(InvalidBidException.class, () -> service.placeBid(a.id(), bidder, PRICE));
+        assertThrows(InvalidBidException.class,
                 () -> service.placeBid(a.id(), bidder, BigDecimal.ZERO));
         assertThrows(NullPointerException.class, () -> service.placeBid(a.id(), bidder, null));
         assertThrows(IllegalArgumentException.class,
@@ -187,5 +195,54 @@ class AuctionServiceTest {
         assertEquals(0, result.bidCount());
         // An exception must release the lock; a later valid bid still succeeds.
         assertEquals(1, service.placeBid(a.id(), bidder, PRICE.add(BigDecimal.ONE)).bidCount());
+    }
+    @Test
+    void startingPriceMustBeWholeVndWithinInclusiveBounds() {
+        BigDecimal max = new BigDecimal("1000000000000");
+        var minimum = service.createAuction(seller, UUID.randomUUID(), new BigDecimal("1.00"), START, END);
+        var maximum = service.createAuction(seller, UUID.randomUUID(), max, START, END);
+        assertEquals(BigDecimal.ONE, minimum.startingPrice());
+        assertEquals(max, maximum.startingPrice());
+
+        for (BigDecimal invalid : List.of(BigDecimal.ZERO, BigDecimal.ONE.negate(),
+                new BigDecimal("1000.01"), max.add(BigDecimal.ONE))) {
+            assertThrows(IllegalArgumentException.class,
+                    () -> service.createAuction(seller, UUID.randomUUID(), invalid, START, END));
+        }
+        assertEquals(2, service.listAuctions().size());
+    }
+
+    @Test
+    void bidPriceIsNormalizedAndClosedAuctionTakesPrecedenceOverInvalidPrice() {
+        var auction = service.createAuction(seller, UUID.randomUUID(), BigDecimal.ONE, START, END);
+        UUID bidder = UUID.randomUUID();
+        BigDecimal max = new BigDecimal("1000000000000");
+        BigDecimal aboveMax = max.add(BigDecimal.ONE);
+        var events = new java.util.ArrayList<vn.uet.auction.observer.AuctionEvent.Type>();
+        service.addListener(event -> events.add(event.type()));
+        clock.set(START);
+        var accepted = service.placeBid(auction.id(), bidder, new BigDecimal("1000.00"));
+        assertEquals(new BigDecimal("1000"), accepted.currentPrice());
+        assertEquals(accepted.currentPrice(), accepted.bids().get(0).getAmount());
+        events.clear();
+
+        for (BigDecimal invalid : List.of(new BigDecimal("1000.01"), aboveMax, new BigDecimal("1000.0"))) {
+            assertThrows(InvalidBidException.class, () -> service.placeBid(auction.id(), bidder, invalid));
+            assertEquals(accepted, service.getAuction(auction.id()).orElseThrow());
+        }
+        assertTrue(events.isEmpty());
+        var atMax = service.placeBid(auction.id(), bidder, max);
+        assertEquals(max, atMax.currentPrice());
+        assertEquals(2, atMax.bidCount());
+        events.clear();
+
+        clock.set(END);
+        assertThrows(AuctionClosedException.class,
+                () -> service.placeBid(auction.id(), bidder, aboveMax.add(new BigDecimal("0.01"))));
+        var finished = service.getAuction(auction.id()).orElseThrow();
+        assertEquals(AuctionStatus.FINISHED, finished.status());
+        assertEquals(atMax.bids(), finished.bids());
+        assertEquals(max, finished.currentPrice());
+        assertEquals(List.of(vn.uet.auction.observer.AuctionEvent.Type.AUCTION_FINISHED), events);
     }
 }

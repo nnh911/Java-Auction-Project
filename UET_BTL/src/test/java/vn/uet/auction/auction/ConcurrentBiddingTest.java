@@ -3,17 +3,24 @@ package vn.uet.auction.auction;
 import static org.junit.jupiter.api.Assertions.*;
 import java.math.BigDecimal;
 import java.time.Clock;
+import java.time.Duration;
+import java.time.ZoneId;
 import java.time.Instant;
 import java.time.ZoneOffset;
 import java.util.ArrayList;
+import java.util.Map;
+import java.util.HashMap;
 import java.util.UUID;
 import java.util.concurrent.*;
 import java.util.concurrent.locks.ReentrantLock;
 import org.junit.jupiter.api.Test;
+import vn.uet.auction.exception.InvalidBidException;
 import vn.uet.auction.model.item.ItemType;
 import vn.uet.auction.model.user.Role;
 import vn.uet.auction.observer.AuctionEvent;
 import vn.uet.auction.persistence.ApplicationState;
+import vn.uet.auction.persistence.MemoryStateStore;
+import vn.uet.auction.model.auction.Bid;
 import vn.uet.auction.security.PasswordHasher;
 import vn.uet.auction.service.ItemService;
 import vn.uet.auction.service.UserService;
@@ -55,7 +62,7 @@ class ConcurrentBiddingTest {
                     try {
                         service.placeBid(auction.id(), bidder, amount);
                         return true;
-                    } catch (IllegalArgumentException rejectedLowerBid) {
+                    } catch (InvalidBidException rejectedLowerBid) {
                         return false;
                     }
                 }));
@@ -80,10 +87,48 @@ class ConcurrentBiddingTest {
                 previous = bid.getAmount();
             }
             assertEquals(snapshot.currentPrice(), previous);
+            Map<UUID, Bid> expectedIndex = new HashMap<>();
+            for (Bid bid : snapshot.bids()) {
+                expectedIndex.put(bid.getId(), bid);
+            }
+            assertEquals(expectedIndex, state.getBids());
+
+            assertThrows(IllegalArgumentException.class,
+                    () -> service.placeBid(auction.id(), bidders.get(0), snapshot.currentPrice()));
+            assertEquals(snapshot, service.getAuction(auction.id()).orElseThrow());
+            assertEquals(expectedIndex, state.getBids());
+            assertEquals(accepted, events.size());
+
+            MemoryStateStore store = new MemoryStateStore();
+            lock.lock();
+            try {
+                store.save(state);
+            } finally {
+                lock.unlock();
+            }
+            ApplicationState loaded = store.load();
+            assertEquals(expectedIndex, loaded.getBids());
+            assertEquals(snapshot.bids(), loaded.getAuctions().get(auction.id()).getHistory());
+            loaded.getBids().clear();
+            loaded.getAuctions().clear();
+            assertEquals(expectedIndex, store.load().getBids());
+            assertEquals(snapshot.bids(), store.load().getAuctions().get(auction.id()).getHistory());
+
         } finally {
             start.countDown();
             pool.shutdownNow();
             assertTrue(pool.awaitTermination(10, TimeUnit.SECONDS));
         }
+    }
+    @Test
+    void clockCanAdvanceAndShareTimeAcrossZones() {
+        Instant now = Instant.parse("2026-11-05T00:00:00Z");
+        MutableClock clock = new MutableClock(now);
+        Clock vietnam = clock.withZone(ZoneId.of("Asia/Ho_Chi_Minh"));
+        clock.advance(Duration.ofMinutes(1));
+        assertEquals(now.plusSeconds(60), vietnam.instant());
+        assertEquals(ZoneId.of("Asia/Ho_Chi_Minh"), vietnam.getZone());
+        clock.set(now);
+        assertEquals(now, vietnam.instant());
     }
 }

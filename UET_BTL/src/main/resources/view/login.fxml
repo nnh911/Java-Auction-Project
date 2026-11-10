@@ -1,6 +1,16 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<!--
-  FILE KHUNG: login. Phụ trách: Thành viên 4. Tuần 7–10.
-  TODO: Nhóm tự thiết kế layout bằng JavaFX/SceneBuilder, khai báo controller,
-  fx:id và event handler sau khi chốt hợp đồng. Chưa có root/layout để tải FXML.
--->
+<?import javafx.geometry.Insets?>
+<?import javafx.scene.control.*?>
+<?import javafx.scene.layout.VBox?>
+
+<VBox spacing="12" xmlns:fx="http://javafx.com/fxml/1"
+      fx:controller="vn.uet.auction.client.controller.LoginController">
+    <padding><Insets top="24" right="24" bottom="24" left="24"/></padding>
+    <Label text="ĐĂNG NHẬP MẪU"/>
+    <TextField fx:id="usernameField" promptText="Tên đăng nhập"/>
+    <PasswordField fx:id="passwordField" promptText="Mật khẩu"/>
+    <Button text="Đăng nhập" onAction="#submit" defaultButton="true"/>
+    <Button text="Chuyển sang đăng ký" onAction="#navigate"/>
+    <Label fx:id="messageLabel" wrapText="true"
+           text="Dùng bidder_demo / Demo123 để thử."/>
+</VBox>
