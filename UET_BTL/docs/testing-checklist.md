@@ -1,5 +1,13 @@
 # Kiểm thử sau ghép tuần 6
 
+## TV4 — kiểm thử tuần 8 trên tuant8
+
+- Chạy `mvn clean test` trong `UET_BTL`. JaCoCo tạo báo cáo ở `target/site/jacoco/index.html`.
+- Lần đo trên bản làm việc tuần 8 có 107 test đạt. Coverage toàn dự án là 622/1017 dòng (61,2%) và 180/355 nhánh (50,7%). Chưa cấu hình ngưỡng bắt buộc.
+- Bộ JUnit hiện chưa chạy các dòng của dispatcher, protocol mapper và các controller. Ưu tiên chuyển kịch bản smoke của dispatcher/mapper thành test JUnit và bổ sung kiểm tra luồng FXML.
+- Test MemoryStateStore tạo tài khoản bằng UserService, khóa tài khoản rồi lưu/tải. Snapshot giữ hash và trạng thái khóa, và hai phía không chia sẻ map tài khoản.
+- Rà soát tuần 9: User, Item, Auction, Bid và AccountState đã hỗ trợ Serializable. ApplicationState chưa Serializable, nên cần chọn cách serialize cả snapshot và test khởi động lại trước khi dùng FileStateStore.
+
 Cập nhật 2026-10-31. Chỉ ghi đạt theo phạm vi thực sự được chạy.
 
 | Bộ kiểm tra | Trạng thái / phạm vi |

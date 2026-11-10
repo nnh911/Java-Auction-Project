@@ -61,6 +61,7 @@ public class AuctionService {
     private final Clock clock;
     private final ReentrantLock lock;
     private final Map<UUID, Auction> auctions;
+    private final Map<UUID, Bid> bids;
     private final UserService userService;
     private final ItemService itemService;
 
@@ -71,22 +72,23 @@ public class AuctionService {
 
     /** Lõi độc lập dành cho test nghiệp vụ không có tài khoản hoặc Item. */
     public AuctionService(Clock clock, ReentrantLock lock, Map<UUID, Auction> auctions) {
-        this(clock, lock, auctions, null, null);
+        this(clock, lock, auctions, new LinkedHashMap<>(), null, null);
     }
 
     /** UserService và ItemService phải dùng cùng state và lock với AuctionService. */
     public AuctionService(Clock clock, ReentrantLock lock, ApplicationState state,
                           UserService userService, ItemService itemService) {
-        this(clock, lock, Objects.requireNonNull(state, "state").getAuctions(),
+        this(clock, lock, Objects.requireNonNull(state, "state").getAuctions(), state.getBids(),
                 Objects.requireNonNull(userService, "userService"),
                 Objects.requireNonNull(itemService, "itemService"));
     }
 
     private AuctionService(Clock clock, ReentrantLock lock, Map<UUID, Auction> auctions,
-                           UserService userService, ItemService itemService) {
+                           Map<UUID, Bid> bids, UserService userService, ItemService itemService) {
         this.clock = Objects.requireNonNull(clock, "clock");
         this.lock = Objects.requireNonNull(lock, "lock");
         this.auctions = Objects.requireNonNull(auctions, "auctions");
+        this.bids = bids;
         this.userService = userService;
         this.itemService = itemService;
     }
@@ -194,7 +196,9 @@ public class AuctionService {
             if (amount.compareTo(auction.getCurrentPrice()) <= 0) {
                 throw new InvalidBidException("Giá đặt phải lớn hơn giá hiện tại");
             }
-            auction.acceptBid(new Bid(UUID.randomUUID(), auctionId, bidderId, amount.setScale(0), now));
+            Bid bid = new Bid(UUID.randomUUID(), auctionId, bidderId, amount.setScale(0), now);
+            auction.acceptBid(bid);
+            bids.put(bid.getId(), bid);
             recordEvent(auction, auction.getStatus(), now, AuctionEvent.Type.BID_ACCEPTED);
             return AuctionSnapshot.of(auction);
         });

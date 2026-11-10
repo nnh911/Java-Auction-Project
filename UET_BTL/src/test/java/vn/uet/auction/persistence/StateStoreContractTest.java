@@ -5,6 +5,9 @@ import vn.uet.auction.model.auction.*;
 import vn.uet.auction.model.item.Electronics;
 import vn.uet.auction.model.user.Bidder;
 import vn.uet.auction.security.PasswordHasher;
+import vn.uet.auction.model.user.Role;
+import vn.uet.auction.service.UserService;
+import java.util.concurrent.locks.ReentrantLock;
 import java.io.IOException;
 import java.math.BigDecimal;
 import java.time.Instant;
@@ -25,11 +28,13 @@ class StateStoreContractTest {
 
     @Test
     void snapshotKeepsLockedAccountAndDoesNotShareAccountMap() throws IOException {
-        ApplicationState original = createState();
-        UUID bidderId = original.getUsers().keySet().iterator().next();
+        ApplicationState original = new ApplicationState();
         PasswordHasher hasher = new PasswordHasher(100_000);
-        String hash = hasher.hash("MatKhauTest123");
-        original.getAccounts().put(bidderId, new AccountState(hash, false));
+        UserService users = new UserService(original, new ReentrantLock(), hasher);
+        UUID adminId = users.bootstrapAdmin("admin_test", "AdminTest123").id();
+        String password = "MatKhauTest123";
+        UUID bidderId = users.register("bidder_test", password, Role.BIDDER).id();
+        users.setUserActive(adminId, bidderId, false);
 
         StateStore store = new MemoryStateStore();
         store.save(original);
@@ -39,7 +44,8 @@ class StateStoreContractTest {
         AccountState account = loaded.getAccounts().get(bidderId);
         assertNotNull(account);
         assertFalse(account.active());
-        assertTrue(hasher.verify("MatKhauTest123", account.passwordHash()));
+        assertNotEquals(password, account.passwordHash());
+        assertTrue(hasher.verify(password, account.passwordHash()));
 
         loaded.getAccounts().clear();
         assertEquals(account, store.load().getAccounts().get(bidderId));
