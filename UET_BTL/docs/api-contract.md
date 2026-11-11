@@ -159,6 +159,71 @@ trên `hthinht8` tại merge `daf3791` cùng thay đổi mapping/test TV3, dùng
 3.9.16 và JDK 25.0.4.1, compile release 17. Kết quả BUILD SUCCESS, 111 test,
 0 failure, 0 error, 0 skipped. Chưa đo JaCoCo cho bản ghép này.
 
+## TV3 — Socket tuần 9 trên nhánh local hthinht9
+
+**Đã triển khai.** Bảng dưới đây ghi API của lớp transport trong checkout local.
+Các chữ ký `CommandDispatcher`, `Session`, `AuctionGateway`, enum và DTO giữ nguyên.
+Chưa ghi nhận nhóm duyệt API transport mới.
+
+| Package / lớp | API public |
+|---|---|
+| `vn.uet.auction.server.AuctionServer` | `AuctionServer(InetSocketAddress address, int maxClients, CommandDispatcher dispatcher) throws IOException` |
+| `AuctionServer` | `int localPort()`, `void serve() throws IOException`, `void close() throws IOException` |
+| `vn.uet.auction.server.ServerMain` | `static void main(String[] args) throws IOException` |
+| `vn.uet.auction.client.network.AuctionClient` | `AuctionClient(InetSocketAddress address, int connectTimeoutMillis, int requestTimeoutMillis) throws IOException`, `void close()` |
+| `AuctionClient implements AuctionGateway` | `CompletionStage<AuctionDetail> getAuction(UUID auctionId)`, `placeBid(UUID auctionId, BigDecimal amount)`, `confirmPayment(UUID auctionId)`, `cancelAuction(UUID auctionId)` |
+| `AuctionClient implements AuctionGateway` | `void addEventListener(ClientEventListener listener)`, `void removeEventListener(ClientEventListener listener)` |
+
+Trong IntelliJ, mở module từ `UET_BTL/pom.xml`, chạy `ServerMain.main`. Program
+arguments nhận một port tùy chọn. Mặc định bind loopback port 5050 và nhận tối đa
+16 kết nối. Dữ liệu nằm trong RAM. Khi nhúng server vào test, truyền port 0 để
+hệ điều hành cấp cổng, đọc `localPort()`, chạy `serve()` một lần trên luồng riêng,
+sau đó gọi `close()` để dừng accept và đóng các socket.
+
+Tạo `new AuctionClient(address, 3000, 5000)` trên luồng nền, giữ một instance
+cho mỗi phiên và gọi `close()` khi rời phiên. Connect và đọc header có timeout.
+Các phương thức gateway trả stage, lỗi server thành `GatewayException`, lỗi
+kết nối thành `IOException`, request hết hạn thành `TimeoutException`. Callback
+event chạy trên luồng đọc, cần trả nhanh. Gateway command yêu cầu đăng nhập.
+Lượt test xuyên service dùng fixture Socket trong `src/test` để gửi
+`REGISTER → LOGIN → LIST/CREATE → PLACE_BID` theo bảng schema v1 bên trên.
+
+Mỗi kết nối có một session. Hai đầu tạo và flush output trước khi mở input.
+Server xử lý request tuần tự theo từng kết nối, có timeout chờ handshake 5 giây
+và chờ dữ liệu 5 phút. Giới hạn 64 KiB dữ liệu đọc mỗi request và bộ lọc kiểu trên
+hai đầu. Bộ lọc còn giới hạn số tham chiếu và byte tích lũy theo kết nối, nên kết
+nối dài có thể bị đóng. Request hợp lệ ở mức wire nhưng sai payload nhận
+`INVALID_REQUEST` cùng requestId. Stream không đọc được sẽ đóng kết nối.
+Client ghép response theo requestId, có tối đa 64 request đang chờ và bỏ qua
+response đến muộn. Request hết hạn có thể đã được server xử lý, nên cần đọc lại
+trạng thái trước khi thử lại lệnh ghi. Kênh demo là Socket loopback dùng
+ObjectStream, chưa có TLS. Client đọc được event. Broadcast từ Observer thuộc W10.
+
+**Đề xuất, chờ nhóm duyệt.**
+
+- API dùng từ controller: `public CompletionStage<Response<? extends Serializable>>
+  sendRequest(Command command, Request.Payload payload)`. Hiện phương thức có
+  phạm vi package trong `client.network`. Cần chốt dùng response nguyên dạng
+  hay façade typed cho login/register/list/detail, quy ước lỗi của façade, ai sở
+  hữu kết nối và bàn giao cùng instance từ login sang list/detail. GUI W9 chưa ghép.
+- Cần TV1/TV2/TV4 bàn giao cơ chế transaction và lỗi lưu file cho dispatcher.
+  Chữ ký `StateStore.load()/save(...)` hiện có, nhưng `FileStateStore.java` trên
+  checkout này còn là khung và các constructor service đang nhận state/lock,
+  chưa nhận cơ chế transaction chung. Cần chốt cách inject, exception lỗi save
+  và đảm bảo chỉ phát Observer sau commit trước khi nối restart/rollback.
+
+**Đối chiếu tài liệu.** Phần mở đầu `docs/file-map.md` mô tả các file ngoài TV1
+là TODO theo nhánh `nht6`. Trên `hthinht9`, `Session.java` và
+`CommandDispatcher.java` đã có triển khai, phù hợp bàn giao TV3 W8 bên trên.
+Mục TV2 lịch sử ghi dispatcher là file khung, còn mô tả lỗi cũ của TV2 đã được
+bảng TV3 W8 cập nhật theo code đang có. Dòng “session thật chưa có” trong baseline
+tuần 6 chỉ áp dụng cho baseline đó.
+
+**Kiểm chứng TV3 ngày 2026-11-10.** `mvn -o -f UET_BTL/pom.xml clean test`
+với Maven 3.9.16 đi kèm IntelliJ, JDK 25.0.4.1 và compile release 17.
+Kết quả 114 test pass, gồm 3 test Socket loopback, 0 failure/error/skipped.
+Chưa xác minh trên runtime JDK 17, GUI, restart với file, Checkstyle hoặc CI.
+
 ## TV4 — StateStore và password
 
 ApplicationState có getUsers/getItems/getAuctions/getBids trả Map<UUID,...> mutable. Constructor rỗng tạo maps mới. Copy constructor:
