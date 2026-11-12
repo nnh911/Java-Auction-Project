@@ -5,11 +5,13 @@ import vn.uet.auction.model.item.Item;
 import vn.uet.auction.model.auction.Auction;
 import vn.uet.auction.model.auction.Bid;
 
+import java.io.Serializable;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.UUID;
 
-public class ApplicationState {
+public class ApplicationState implements Serializable {
+    private static final long serialVersionUID = 1L;
 
     private Map<UUID, User> users;
     private Map<UUID, Item> items;
