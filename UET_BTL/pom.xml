@@ -38,6 +38,20 @@
   </dependencies>
   <build>
     <plugins>
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-checkstyle-plugin</artifactId>
+        <version>3.6.0</version>
+        <configuration>
+          <configLocation>${project.basedir}/checkstyle.xml</configLocation>
+        </configuration>
+        <executions>
+          <execution>
+            <phase>verify</phase>
+            <goals><goal>check</goal></goals>
+          </execution>
+        </executions>
+      </plugin>
       <!-- Đo coverage khi chạy test, chưa đặt ngưỡng cho tuần 8. -->
       <plugin>
         <groupId>org.jacoco</groupId>
