@@ -11,8 +11,12 @@ import java.net.InetAddress;
 import java.net.InetSocketAddress;
 import java.net.ServerSocket;
 import java.net.Socket;
+import java.nio.file.Path;
 import java.time.Clock;
 import java.time.Instant;
+import java.time.ZoneId;
+import java.time.ZoneOffset;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.CountDownLatch;
@@ -23,12 +27,15 @@ import java.util.concurrent.TimeoutException;
 import java.util.concurrent.locks.ReentrantLock;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
+import org.junit.jupiter.api.io.TempDir;
 import vn.uet.auction.client.network.AuctionClient;
 import vn.uet.auction.client.network.GatewayException;
 import vn.uet.auction.model.auction.AuctionStatus;
 import vn.uet.auction.model.item.ItemType;
 import vn.uet.auction.model.user.Role;
 import vn.uet.auction.persistence.ApplicationState;
+import vn.uet.auction.persistence.FileStateStore;
+import vn.uet.auction.persistence.StateStore;
 import vn.uet.auction.protocol.Command;
 import vn.uet.auction.protocol.ErrorCode;
 import vn.uet.auction.protocol.EventMessage;
@@ -36,10 +43,12 @@ import vn.uet.auction.protocol.Request;
 import vn.uet.auction.protocol.Response;
 import vn.uet.auction.protocol.dto.AuctionDetail;
 import vn.uet.auction.protocol.dto.BidSummary;
+import vn.uet.auction.protocol.dto.ItemDetail;
 import vn.uet.auction.protocol.dto.UserSummary;
 import vn.uet.auction.security.PasswordHasher;
 import vn.uet.auction.server.AuctionServer;
 import vn.uet.auction.server.CommandDispatcher;
+import vn.uet.auction.server.PersistentServerFixture;
 import vn.uet.auction.service.AuctionService;
 import vn.uet.auction.service.ItemService;
 import vn.uet.auction.service.UserService;
@@ -103,6 +112,150 @@ class AuctionServerTest {
                         () -> fresh.getAuction(UUID.randomUUID()).toCompletableFuture().get(5, TimeUnit.SECONDS));
                 assertEquals(ErrorCode.UNAUTHENTICATED,
                         assertInstanceOf(GatewayException.class, failure.getCause()).getErrorCode());
+            }
+            server.close();
+            accepting.get(5, TimeUnit.SECONDS);
+        } finally {
+            executor.shutdownNow();
+        }
+    }
+
+    @Test
+    void readsCommittedBidThroughSocketAfterRestart(@TempDir Path directory) throws Exception {
+        var store = new FileStateStore(directory.resolve("auction-state.bin"));
+        var now = Instant.parse("2026-11-13T00:00:00Z");
+        var time = new AtomicReference<>(now);
+        var clock = new Clock() {
+            @Override
+            public ZoneId getZone() {
+                return ZoneOffset.UTC;
+            }
+
+            @Override
+            public Clock withZone(ZoneId zone) {
+                return Clock.fixed(instant(), zone);
+            }
+
+            @Override
+            public Instant instant() {
+                return time.get();
+            }
+        };
+        var executor = Executors.newSingleThreadExecutor();
+        try {
+            AuctionDetail committed;
+            UUID bidderId;
+            UUID savedItemId;
+            UUID deletedItemId;
+            try (var fixture = PersistentServerFixture.open(loopback(0), store, clock)) {
+                var server = fixture.server();
+                var accepting = executor.submit(() -> {
+                    server.serve();
+                    return null;
+                });
+                try (var seller = new WireClient(server.localPort());
+                     var bidder = new WireClient(server.localPort())) {
+                    registerAndLogin(seller, "seller", Role.SELLER);
+                    bidderId = registerAndLogin(bidder, "bidder", Role.BIDDER);
+                    var itemId = (UUID) success(seller.call(Command.CREATE_ITEM,
+                            new Request.CreateItemPayload(ItemType.ART, "Painting", "")));
+                    var auction = (AuctionDetail) success(seller.call(Command.CREATE_AUCTION,
+                            new Request.CreateAuctionPayload(itemId, BigDecimal.TEN,
+                                    now.minusSeconds(1), now.plusSeconds(600))));
+                    assertTrue(bidder.call(Command.LIST_AUCTIONS, new Request.EmptyPayload()).success());
+                    var auctionPayload = new Request.AuctionIdPayload(auction.id());
+                    assertEquals(auction, success(bidder.call(Command.GET_AUCTION, auctionPayload)));
+                    assertEquals(ErrorCode.INVALID_BID, bidder.call(Command.PLACE_BID,
+                            new Request.PlaceBidPayload(auction.id(), BigDecimal.ONE)).errorCode());
+                    var placed = (AuctionDetail) success(bidder.call(Command.PLACE_BID,
+                            new Request.PlaceBidPayload(auction.id(), new BigDecimal("12"))));
+                    assertEquals(new BigDecimal("12"), placed.currentPrice());
+                    time.set(now.plusSeconds(600));
+                    fixture.scheduler().start();
+                    // Poll the committed state while the scheduler advances independently of requests.
+                    var deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
+                    AuctionDetail detail;
+                    do {
+                        detail = (AuctionDetail) success(bidder.call(Command.GET_AUCTION, auctionPayload));
+                        if (detail.winnerId() != null) {
+                            break;
+                        }
+                        Thread.sleep(25);
+                    } while (System.nanoTime() < deadline);
+                    committed = detail;
+                    assertEquals(AuctionStatus.FINISHED, committed.status());
+                    assertEquals(bidderId, committed.winnerId());
+                    assertEquals(ErrorCode.AUCTION_CLOSED, bidder.call(Command.PLACE_BID,
+                            new Request.PlaceBidPayload(auction.id(), new BigDecimal("13"))).errorCode());
+                    registerAndLogin(seller, "lateSeller", Role.SELLER);
+                    savedItemId = (UUID) success(seller.call(Command.CREATE_ITEM,
+                            new Request.CreateItemPayload(ItemType.ART, "Initial name", "")));
+                    success(seller.call(Command.UPDATE_ITEM, new Request.UpdateItemPayload(
+                            savedItemId, ItemType.ART, "Saved without a bid", "")));
+                    deletedItemId = (UUID) success(seller.call(Command.CREATE_ITEM,
+                            new Request.CreateItemPayload(ItemType.ART, "Deleted item", "")));
+                    success(seller.call(Command.DELETE_ITEM, new Request.ItemIdPayload(deletedItemId)));
+                }
+                server.close();
+                accepting.get(5, TimeUnit.SECONDS);
+            }
+
+            try (var fixture = PersistentServerFixture.open(loopback(0), store, clock)) {
+                var restarted = fixture.server();
+                var accepting = executor.submit(() -> {
+                    restarted.serve();
+                    return null;
+                });
+                try (var bidder = new WireClient(restarted.localPort())) {
+                    var auctionPayload = new Request.AuctionIdPayload(committed.id());
+                    assertEquals(ErrorCode.UNAUTHENTICATED, bidder.call(Command.GET_AUCTION, auctionPayload).errorCode());
+                    var user = (UserSummary) success(bidder.call(Command.LOGIN,
+                            new Request.LoginPayload("bidder", "password")));
+                    assertEquals(bidderId, user.id());
+                    assertEquals(committed, success(bidder.call(Command.GET_AUCTION, auctionPayload)));
+                    success(bidder.call(Command.LOGIN, new Request.LoginPayload("lateSeller", "password")));
+                    var item = assertInstanceOf(ItemDetail.class,
+                            success(bidder.call(Command.GET_ITEM, new Request.ItemIdPayload(savedItemId))));
+                    assertEquals("Saved without a bid", item.name());
+                    assertEquals(ErrorCode.NOT_FOUND, bidder.call(Command.GET_ITEM,
+                            new Request.ItemIdPayload(deletedItemId)).errorCode());
+                }
+                restarted.close();
+                accepting.get(5, TimeUnit.SECONDS);
+            }
+        } finally {
+            executor.shutdownNow();
+        }
+    }
+
+    @Test
+    void failedRegisterSaveReturnsErrorAndDoesNotPublishAccount() throws Exception {
+        StateStore failingStore = new StateStore() {
+            @Override
+            public ApplicationState load() {
+                return new ApplicationState();
+            }
+
+            @Override
+            public void save(ApplicationState state) throws IOException {
+                throw new IOException("Simulated snapshot write failure");
+            }
+        };
+
+        var executor = Executors.newSingleThreadExecutor();
+        try (var fixture = PersistentServerFixture.open(loopback(0), failingStore, Clock.systemUTC())) {
+            var server = fixture.server();
+            var accepting = executor.submit(() -> {
+                server.serve();
+                return null;
+            });
+            try (var client = new WireClient(server.localPort())) {
+                var failed = client.call(Command.REGISTER, new Request.RegisterPayload("seller", "password", Role.SELLER));
+                assertFalse(failed.success());
+                assertEquals(ErrorCode.INTERNAL_ERROR, failed.errorCode());
+                assertNull(failed.data());
+                assertEquals(ErrorCode.AUTHENTICATION_FAILED, client.call(Command.LOGIN,
+                        new Request.LoginPayload("seller", "password")).errorCode());
             }
             server.close();
             accepting.get(5, TimeUnit.SECONDS);

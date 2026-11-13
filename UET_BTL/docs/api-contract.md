@@ -173,10 +173,15 @@ Chưa ghi nhận nhóm duyệt API transport mới.
 | `vn.uet.auction.client.network.AuctionClient` | `AuctionClient(InetSocketAddress address, int connectTimeoutMillis, int requestTimeoutMillis) throws IOException`, `void close()` |
 | `AuctionClient implements AuctionGateway` | `CompletionStage<AuctionDetail> getAuction(UUID auctionId)`, `placeBid(UUID auctionId, BigDecimal amount)`, `confirmPayment(UUID auctionId)`, `cancelAuction(UUID auctionId)` |
 | `AuctionClient implements AuctionGateway` | `void addEventListener(ClientEventListener listener)`, `void removeEventListener(ClientEventListener listener)` |
+| `vn.uet.auction.client.network.ClientEventListener` | `void onEvent(EventMessage event)` |
 
 Trong IntelliJ, mở module từ `UET_BTL/pom.xml`, chạy `ServerMain.main`. Program
-arguments nhận một port tùy chọn. Mặc định bind loopback port 5050 và nhận tối đa
-16 kết nối. Dữ liệu nằm trong RAM. Khi nhúng server vào test, truyền port 0 để
+arguments theo dạng `[port] [snapshot-path]`. Mặc định bind loopback port 5050,
+nhận tối đa 16 kết nối và dùng `data/auction-state.bin` tính từ working directory.
+`ServerMain` tải snapshot qua `StateTransactions` trước khi mở cổng. Snapshot
+hỏng làm khởi động thất bại và giữ nguyên file. Dispatcher và scheduler dùng
+cùng một `AuctionService`. Scheduler tick trên luồng nền
+với khoảng nghỉ một giây và được đóng cùng server. Khi nhúng server vào test, truyền port 0 để
 hệ điều hành cấp cổng, đọc `localPort()`, chạy `serve()` một lần trên luồng riêng,
 sau đó gọi `close()` để dừng accept và đóng các socket.
 
@@ -206,11 +211,20 @@ ObjectStream, chưa có TLS. Client đọc được event. Broadcast từ Observ
   phạm vi package trong `client.network`. Cần chốt dùng response nguyên dạng
   hay façade typed cho login/register/list/detail, quy ước lỗi của façade, ai sở
   hữu kết nối và bàn giao cùng instance từ login sang list/detail. GUI W9 chưa ghép.
-- Cần TV1/TV2/TV4 bàn giao cơ chế transaction và lỗi lưu file cho dispatcher.
-  Chữ ký `StateStore.load()/save(...)` hiện có, nhưng `FileStateStore.java` trên
-  checkout này còn là khung và các constructor service đang nhận state/lock,
-  chưa nhận cơ chế transaction chung. Cần chốt cách inject, exception lỗi save
-  và đảm bảo chỉ phát Observer sau commit trước khi nối restart/rollback.
+**Đã triển khai tích hợp TV1–TV4 trên `hthinht9`.** Dispatcher dùng
+`vn.uet.auction.service.StateTransactions` và `FileStateStore` cho REGISTER,
+SET_USER_ACTIVE và các lệnh ghi item. Service TV1 chạy trên bản sao của
+coordinator TV2 dưới cùng lock với đấu giá. Response thành công chỉ được gửi
+sau khi lưu và công bố snapshot. Khi save lỗi, trả `INTERNAL_ERROR` với
+requestId ban đầu và data null. Các constructor public giữ chế độ cũ.
+`ServerMain.configure(StateStore, Clock)` là điểm ghép nội bộ cho production
+và test, có phạm vi package.
+
+Đối chiếu `nnhoangt9` (`275de0e`) và `tv1-tuan9.patch`: bàn giao TV1 dùng
+`StateTransaction`, đề nghị `STORAGE_ERROR` và mô tả framing 4 byte. Tích hợp
+này dùng coordinator TV2 đã có trên `cngt9` (`76ab219`) và FileStateStore
+trên `tuant9` (`97ce5d1`). Wire protocol đang chạy vẫn dùng ObjectStream
+trực tiếp và `INTERNAL_ERROR`. Thay đổi wire và enum lỗi chờ nhóm duyệt.
 
 **Đối chiếu tài liệu.** Phần mở đầu `docs/file-map.md` mô tả các file ngoài TV1
 là TODO theo nhánh `nht6`. Trên `hthinht9`, `Session.java` và
@@ -223,6 +237,22 @@ tuần 6 chỉ áp dụng cho baseline đó.
 với Maven 3.9.16 đi kèm IntelliJ, JDK 25.0.4.1 và compile release 17.
 Kết quả 114 test pass, gồm 3 test Socket loopback, 0 failure/error/skipped.
 Chưa xác minh trên runtime JDK 17, GUI, restart với file, Checkstyle hoặc CI.
+
+Test Socket tuần 9 bao phủ luồng login → list → chi tiết → bid,
+bid thấp, scheduler tự đóng và chọn người thắng, bid muộn, tải lại phiên
+và CRUD sau khi dựng server mới từ snapshot. Test lỗi ghi xác nhận register
+thất bại không công bố tài khoản vào RAM.
+
+**Kiểm chứng tích hợp ngày 2026-11-13.** `mvn -o -f UET_BTL/pom.xml clean verify`
+bằng Maven của IntelliJ và JDK 25.0.4.1, biên dịch release 17. 126 test đạt,
+gồm 5 test Socket, 0 failure/error/skipped và 0 vi phạm Checkstyle.
+Test restart dựng instance server mới trong cùng JVM. Chưa chạy GUI, CI
+hoặc runtime JDK 17.
+
+**Đối chiếu coordinator.** Đề xuất TV2 ở mục “Đề xuất giao dịch chung”
+đặt `StateTransactions` trong `vn.uet.auction.persistence`. Lớp đã triển khai
+nằm trong `vn.uet.auction.service`, theo mục “TV2 tuần 9 — giao dịch đấu giá
+đã triển khai”. Server dùng trực tiếp coordinator đó để ghép cả user/item và đấu giá.
 
 ## TV4 — StateStore và password
 
