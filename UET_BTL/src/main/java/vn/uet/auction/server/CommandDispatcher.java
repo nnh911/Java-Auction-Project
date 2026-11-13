@@ -1,5 +1,6 @@
 package vn.uet.auction.server;
 
+import java.io.IOException;
 import java.io.Serializable;
 import java.util.ArrayList;
 import java.util.Objects;
@@ -12,16 +13,20 @@ import vn.uet.auction.protocol.Request.*;
 import vn.uet.auction.protocol.dto.*;
 import vn.uet.auction.model.user.Role;
 import vn.uet.auction.protocol.mapper.ProtocolMapper;
+import vn.uet.auction.security.PasswordHasher;
 import vn.uet.auction.service.AuctionService;
+import vn.uet.auction.service.StateTransactions;
 import vn.uet.auction.service.ItemService;
 import vn.uet.auction.service.UserService;
 
-/** In-memory dispatcher. Supply services configured with the same application state and lock. */
+/** Routes protocol commands to services sharing the same application state and lock. */
 public final class CommandDispatcher {
     private final UserService users;
     private final ItemService items;
     private final ReentrantLock lock;
     private final AuctionService auctions;
+    private final StateTransactions transactions;
+    private final PasswordHasher hasher;
 
     public CommandDispatcher(UserService users, ItemService items, ReentrantLock lock) {
         this(users, items, lock, null);
@@ -29,6 +34,13 @@ public final class CommandDispatcher {
 
     public CommandDispatcher(UserService users, ItemService items, ReentrantLock lock,
                              AuctionService auctions) {
+        this(users, items, lock, auctions, null, null);
+    }
+
+    CommandDispatcher(UserService users, ItemService items, ReentrantLock lock,
+                      AuctionService auctions, StateTransactions transactions, PasswordHasher hasher) {
+        this.transactions = transactions;
+        this.hasher = hasher;
         this.auctions = auctions;
         this.users = Objects.requireNonNull(users);
         this.items = Objects.requireNonNull(items);
@@ -47,6 +59,22 @@ public final class CommandDispatcher {
             default:
                 break;
         }
+        if (transactions != null && writesUsersOrItems(request.command())) {
+            try {
+                return transactions.write(candidate -> {
+                    var candidateUsers = new UserService(candidate, lock, hasher);
+                    var candidateItems = new ItemService(candidate, lock);
+                    return dispatchUsersAndItems(session, request, candidateUsers, candidateItems);
+                }, Response::success);
+            } catch (IOException failure) {
+                return fail(request, ErrorCode.INTERNAL_ERROR);
+            }
+        }
+        return dispatchUsersAndItems(session, request, users, items);
+    }
+
+    private Response<? extends Serializable> dispatchUsersAndItems(
+            Session session, Request request, UserService users, ItemService items) {
         lock.lock();
         try {
             if (request.command() == Command.LOGIN) session.clear();
@@ -165,6 +193,13 @@ public final class CommandDispatcher {
         } catch (RuntimeException e) {
             return fail(request, ErrorCode.INTERNAL_ERROR);
         }
+    }
+
+    private static boolean writesUsersOrItems(Command command) {
+        return switch (command) {
+            case REGISTER, SET_USER_ACTIVE, CREATE_ITEM, UPDATE_ITEM, DELETE_ITEM -> true;
+            default -> false;
+        };
     }
 
     private static boolean validPayload(Request request) {
