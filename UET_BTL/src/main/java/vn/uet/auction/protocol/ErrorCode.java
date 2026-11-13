@@ -11,5 +11,6 @@ public enum ErrorCode {
     CONFLICT,
     INVALID_BID,
     AUCTION_CLOSED,
+    STORAGE_ERROR,
     INTERNAL_ERROR
 }

@@ -31,7 +31,7 @@ Dự án được dựng lại theo [kế hoạch tuần6–15](KE_HOACH_BTL_THE
 - src/main/resources/view: file FXML chờ tự thiết kế layout/controller và CSS.
 - docs/diagrams: vị trí nhóm tự vẽ class diagram/kiến trúc Mermaid.
 
-Chỉ dùng mvn test / mvn verify / chạy JavaFX sau khi nhóm đã hoàn thiện các phần tương ứng. Chưa có lệnh chạy server/client vì ServerMain và ClientApp chưa được viết.
+Chạy `mvn test` để kiểm thử dự án. Xem mục **Chạy luồng Seller tuần 9** để khởi động server và client.
 
 Không tạo sẵn module auto-bidding/anti-sniping/LineChart: nhóm quyết định phạm vi tùy chọn ở tuần13–14 theo PDF.
 
@@ -64,3 +64,15 @@ if ($LASTEXITCODE -ne 0) { throw 'JavaFX compilation failed' }
 ```
 
 Cửa sổ hiện tên Hoàng; bấm Button để đổi Label. Máy khác cần chỉnh đường dẫn JDK/JavaFX tương ứng. Ví dụ này chưa thay thế phần FXML/SceneBuilder chung của TV4.
+
+## Chạy luồng Seller tuần 9
+
+Từ thư mục `UET_BTL`, chạy `mvn test`. Mở hai terminal tại cùng thư mục.
+
+1. Terminal máy chủ chạy `java -cp target/classes vn.uet.auction.server.ServerMain 5555 data/auction.ser`.
+2. Terminal giao diện chạy `mvn javafx:run`. Đăng ký tài khoản Seller, đăng nhập, rồi tạo, xem, sửa hoặc xóa sản phẩm. Máy chủ và giao diện kết nối qua loopback.
+3. Khởi động lại máy chủ với cùng đường dẫn snapshot và mở lại giao diện để kiểm tra tài khoản và sản phẩm đã lưu.
+
+Đặt biến môi trường `AUCTION_ADMIN_PASSWORD` trước lần khởi động cần tạo tài khoản `admin`. Máy chủ chỉ dùng biến này khi snapshot chưa có Admin. `SET_USER_ACTIVE` yêu cầu phiên Admin. Mọi lệnh cần đăng nhập kiểm tra lại trạng thái tài khoản từ server. Session và phản hồi đăng nhập chỉ dùng `UserSummary` gồm ID, tên đăng nhập và vai trò.
+
+`UserItemSocketTest` chạy luồng TCP với file tạm, kiểm tra dữ liệu qua nhiều lần khởi động, quyền sở hữu và lỗi ghi. Giao thức hiện dùng một request/response mỗi lần, với đối tượng Java có tiền tố độ dài và giới hạn kiểu dữ liệu đọc vào. Phần giao dịch riêng của đấu giá và phát event qua mạng do TV2/TV3 tiếp tục tích hợp.

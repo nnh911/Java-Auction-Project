@@ -9,7 +9,14 @@ import java.util.HashMap;
 import java.util.Map;
 import java.util.UUID;
 
-public class ApplicationState {
+public class ApplicationState implements java.io.Serializable {
+    private static final long serialVersionUID = 1L;
+
+    void commitUsersAndItems(ApplicationState next) {
+        users = next.users;
+        accounts = next.accounts;
+        items = next.items;
+    }
 
     private Map<UUID, User> users;
     private Map<UUID, Item> items;

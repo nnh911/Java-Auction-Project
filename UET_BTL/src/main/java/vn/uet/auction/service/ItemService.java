@@ -11,6 +11,8 @@ import vn.uet.auction.model.item.Item;
 import vn.uet.auction.model.item.ItemType;
 import vn.uet.auction.model.user.Role;
 import vn.uet.auction.persistence.ApplicationState;
+import vn.uet.auction.persistence.MemoryStateStore;
+import vn.uet.auction.persistence.StateTransaction;
 import vn.uet.auction.protocol.dto.ItemDetail;
 import vn.uet.auction.protocol.dto.ItemSummary;
 import vn.uet.auction.security.PasswordHasher;
@@ -20,18 +22,26 @@ public final class ItemService {
     private final ApplicationState state;
     private final ReentrantLock lock;
     private final UserService users;
+    private final StateTransaction transaction;
 
     public ItemService(ApplicationState state, ReentrantLock lock) {
+        this(state, lock, new UserService(state, lock, new PasswordHasher()),
+                new StateTransaction(state, lock, new MemoryStateStore()));
+    }
+
+    public ItemService(ApplicationState state, ReentrantLock lock, UserService users,
+                       StateTransaction transaction) {
+        this.transaction = Objects.requireNonNull(transaction, "transaction");
         this.state = Objects.requireNonNull(state, "state");
         this.lock = Objects.requireNonNull(lock, "lock");
-        this.users = new UserService(state, lock, new PasswordHasher());
+        this.users = Objects.requireNonNull(users, "users");
     }
 
     public UUID createItem(UUID actorId, ItemType type, String name, String description) {
-        return inLock(() -> {
+        return transaction.writeUsersAndItems(next -> {
             users.requireRole(actorId, Role.SELLER);
             Item item = create(UUID.randomUUID(), actorId, type, name, description);
-            state.getItems().put(item.getId(), item);
+            next.getItems().put(item.getId(), item);
             return item.getId();
         });
     }
@@ -54,18 +64,18 @@ public final class ItemService {
     }
 
     public void updateItem(UUID actorId, UUID itemId, ItemType type, String name, String description) {
-        inLock(() -> {
+        transaction.writeUsersAndItems(next -> {
             requireEditable(actorId, itemId);
             Item replacement = create(itemId, actorId, type, name, description);
-            state.getItems().put(itemId, replacement);
+            next.getItems().put(itemId, replacement);
             return null;
         });
     }
 
     public void deleteItem(UUID actorId, UUID itemId) {
-        inLock(() -> {
+        transaction.writeUsersAndItems(next -> {
             requireEditable(actorId, itemId);
-            state.getItems().remove(itemId);
+            next.getItems().remove(itemId);
             return null;
         });
     }

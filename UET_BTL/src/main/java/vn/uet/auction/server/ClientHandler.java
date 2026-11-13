@@ -1,6 +1,35 @@
-// FILE KHUNG — CHƯA TRIỂN KHAI.
-// Phụ trách: Thành viên 3. Tuần học kỳ: 9–12.
-// Package dự kiến: vn.uet.auction.server
-// Mục đích: Nhận request, dùng session server và gửi response/event.
-// TODO: Nhóm tự viết package, khai báo kiểu, field, constructor và method.
-// Thống nhất hợp đồng trước khi code; xem KE_HOACH_BTL_THEO_PDF.md.
+package vn.uet.auction.server;
+
+import java.io.DataInputStream;
+import java.io.DataOutputStream;
+import java.io.IOException;
+import java.net.Socket;
+import vn.uet.auction.protocol.Request;
+import vn.uet.auction.protocol.WireMessage;
+
+/** Keeps authentication state local to one TCP connection. */
+final class ClientHandler implements Runnable {
+    private final Socket socket;
+    private final CommandDispatcher dispatcher;
+
+    ClientHandler(Socket socket, CommandDispatcher dispatcher) {
+        this.socket = socket;
+        this.dispatcher = dispatcher;
+    }
+
+    @Override
+    public void run() {
+        Session session = new Session();
+        try (socket;
+             var input = new DataInputStream(socket.getInputStream());
+             var output = new DataOutputStream(socket.getOutputStream())) {
+            while (WireMessage.read(input, WireMessage.REQUESTS) instanceof Request request) {
+                WireMessage.write(output, dispatcher.dispatch(session, request));
+            }
+        } catch (IOException e) {
+            // A disconnected client or invalid message ends only its own session.
+        } finally {
+            session.clear();
+        }
+    }
+}

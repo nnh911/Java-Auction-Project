@@ -1,6 +1,7 @@
 package vn.uet.auction.server;
 
 import java.io.Serializable;
+import java.io.UncheckedIOException;
 import java.util.ArrayList;
 import java.util.Objects;
 import java.util.UUID;
@@ -98,6 +99,8 @@ public final class CommandDispatcher {
                 default -> { return fail(request, ErrorCode.UNSUPPORTED_COMMAND); }
             }
             return Response.ok(request.requestId(), result);
+        } catch (UncheckedIOException e) {
+            return fail(request, ErrorCode.STORAGE_ERROR);
         } catch (AuthenticationException e) {
             return fail(request, ErrorCode.AUTHENTICATION_FAILED);
         } catch (SecurityException e) {

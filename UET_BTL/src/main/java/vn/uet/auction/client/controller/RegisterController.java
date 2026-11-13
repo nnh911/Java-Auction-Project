@@ -1,12 +1,13 @@
 package vn.uet.auction.client.controller;
 
+import javafx.application.Platform;
 import javafx.fxml.FXML;
 import javafx.scene.control.Label;
 import javafx.scene.control.PasswordField;
 import javafx.scene.control.TextField;
 import javafx.scene.control.ComboBox;
 import vn.uet.auction.model.user.Role;
-import vn.uet.auction.client.ClientApp.FakeAuthGateway;
+import vn.uet.auction.client.ClientApp;
 
 public class RegisterController {
     @FXML private TextField usernameField;
@@ -15,10 +16,10 @@ public class RegisterController {
     @FXML private ComboBox<Role> roleBox;
     @FXML private Label messageLabel;
 
-    private FakeAuthGateway gateway;
+    private ClientApp gateway;
     private Runnable navigate;
 
-    public void configure(FakeAuthGateway gateway, Runnable navigate) {
+    public void configure(ClientApp gateway, Runnable navigate) {
         this.gateway = gateway;
         this.navigate = navigate;
     }
@@ -31,19 +32,21 @@ public class RegisterController {
 
     @FXML
     private void submit() {
-        try {
-            String password = passwordField.getText();
-            if (!password.equals(confirmField.getText())) {
-                messageLabel.setText("Hai mật khẩu chưa giống nhau.");
-                return;
-            }
-            messageLabel.setText(gateway.register(usernameField.getText(), password, roleBox.getValue()));
-        } catch (IllegalArgumentException exception) {
-            messageLabel.setText(exception.getMessage());
-        } finally {
-            passwordField.clear();
-            confirmField.clear();
+        String password = passwordField.getText();
+        boolean matched = password.equals(confirmField.getText());
+        passwordField.clear();
+        confirmField.clear();
+        if (!matched) {
+            messageLabel.setText("Hai mật khẩu chưa giống nhau.");
+            return;
         }
+        messageLabel.getScene().getRoot().setDisable(true);
+        gateway.register(usernameField.getText(), password, roleBox.getValue())
+                .whenComplete((user, error) -> Platform.runLater(() -> {
+                    messageLabel.getScene().getRoot().setDisable(false);
+                    messageLabel.setText(error == null ? "Đã đăng ký " + user.username()
+                            : error.getCause().getMessage());
+                }));
     }
 
     @FXML

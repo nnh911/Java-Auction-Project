@@ -96,6 +96,7 @@ và message rỗng. Lỗi có data null và message bằng tên ErrorCode khi đ
 | InvalidBidException qua Rejection.Reason.INVALID_BID | INVALID_BID |
 | AuctionClosedException | AUCTION_CLOSED |
 | IllegalStateException khác hoặc Rejection.CONFLICT | CONFLICT |
+| DAO không lưu được thay đổi tài khoản hoặc sản phẩm | STORAGE_ERROR |
 | Dispatcher được khởi tạo thiếu AuctionService khi gọi command đấu giá bằng session hợp lệ | UNSUPPORTED_COMMAND |
 | RuntimeException khác, gồm NullPointerException nội bộ | INTERNAL_ERROR |
 

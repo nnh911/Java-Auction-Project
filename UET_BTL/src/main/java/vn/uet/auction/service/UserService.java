@@ -9,16 +9,25 @@ import vn.uet.auction.exception.AuthenticationException;
 import vn.uet.auction.model.user.*;
 import vn.uet.auction.persistence.AccountState;
 import vn.uet.auction.persistence.ApplicationState;
+import vn.uet.auction.persistence.MemoryStateStore;
+import vn.uet.auction.persistence.StateTransaction;
 import vn.uet.auction.protocol.dto.UserSummary;
 import vn.uet.auction.security.PasswordHasher;
 
-/** Week-7 in-memory API. Actor IDs must come from a trusted server session. */
+/** Account API. Actor IDs must come from a trusted server session. */
 public final class UserService {
     private final ApplicationState state;
     private final ReentrantLock lock;
     private final PasswordHasher hasher;
+    private final StateTransaction transaction;
 
     public UserService(ApplicationState state, ReentrantLock lock, PasswordHasher hasher) {
+        this(state, lock, hasher, new StateTransaction(state, lock, new MemoryStateStore()));
+    }
+
+    public UserService(ApplicationState state, ReentrantLock lock, PasswordHasher hasher,
+                       StateTransaction transaction) {
+        this.transaction = Objects.requireNonNull(transaction, "transaction");
         this.state = Objects.requireNonNull(state, "state");
         this.lock = Objects.requireNonNull(lock, "lock");
         this.hasher = Objects.requireNonNull(hasher, "hasher");
@@ -40,13 +49,13 @@ public final class UserService {
     private UserSummary insert(User user, String password, boolean bootstrap) {
         if (password == null || password.isBlank()) throw new IllegalArgumentException("Password must not be blank");
         String hash = hasher.hash(password);
-        return inLock(() -> {
-            if (bootstrap && state.getUsers().values().stream().anyMatch(u -> u.getRole() == Role.ADMIN))
+        return transaction.writeUsersAndItems(next -> {
+            if (bootstrap && next.getUsers().values().stream().anyMatch(u -> u.getRole() == Role.ADMIN))
                 throw new IllegalStateException("Admin already initialized");
-            if (state.getUsers().values().stream().anyMatch(u -> u.getUsername().equals(user.getUsername())))
+            if (next.getUsers().values().stream().anyMatch(u -> u.getUsername().equals(user.getUsername())))
                 throw new IllegalStateException("Username already exists");
-            state.getUsers().put(user.getId(), user);
-            state.getAccounts().put(user.getId(), new AccountState(hash, true));
+            next.getUsers().put(user.getId(), user);
+            next.getAccounts().put(user.getId(), new AccountState(hash, true));
             return summary(user);
         });
     }
@@ -74,17 +83,17 @@ public final class UserService {
     }
 
     public void setUserActive(UUID actorId, UUID userId, boolean active) {
-        inLock(() -> {
+        transaction.writeUsersAndItems(next -> {
             requireRole(actorId, Role.ADMIN);
-            User target = state.getUsers().get(Objects.requireNonNull(userId, "userId"));
-            AccountState account = state.getAccounts().get(userId);
+            User target = next.getUsers().get(Objects.requireNonNull(userId, "userId"));
+            AccountState account = next.getAccounts().get(userId);
             if (target == null || account == null) throw new IllegalArgumentException("Account not found");
             if (!active && target.getRole() == Role.ADMIN && account.active()) {
-                long admins = state.getUsers().values().stream().filter(u -> u.getRole() == Role.ADMIN)
-                        .filter(u -> state.getAccounts().containsKey(u.getId()) && state.getAccounts().get(u.getId()).active()).count();
+                long admins = next.getUsers().values().stream().filter(u -> u.getRole() == Role.ADMIN)
+                        .filter(u -> next.getAccounts().containsKey(u.getId()) && next.getAccounts().get(u.getId()).active()).count();
                 if (admins <= 1) throw new IllegalStateException("Cannot disable the last active Admin");
             }
-            state.getAccounts().put(userId, new AccountState(account.passwordHash(), active));
+            next.getAccounts().put(userId, new AccountState(account.passwordHash(), active));
             return null;
         });
     }

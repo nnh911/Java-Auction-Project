@@ -3,12 +3,15 @@ package vn.uet.auction.client.controller;
 import java.util.List;
 import java.util.Objects;
 import java.util.UUID;
+import java.util.concurrent.CompletableFuture;
+import javafx.application.Platform;
 import javafx.fxml.FXML;
+import javafx.scene.layout.BorderPane;
 import javafx.scene.control.*;
 import vn.uet.auction.model.item.ItemType;
 import vn.uet.auction.protocol.dto.ItemDetail;
 
-/** Week-7 prototype: injected fake gateway, no domain rules in the controller. */
+/** Seller form backed by the injected gateway. */
 public final class SellerController {
     public interface Gateway {
         List<ItemDetail> list();
@@ -16,6 +19,7 @@ public final class SellerController {
         void update(UUID id, ItemType type, String name, String description);
         void delete(UUID id);
     }
+    @FXML private BorderPane root;
     @FXML private ListView<ItemDetail> items;
     @FXML private ComboBox<ItemType> type;
     @FXML private TextField name;
@@ -38,20 +42,56 @@ public final class SellerController {
             }
         });
     }
-    public void setGateway(Gateway gateway) { this.gateway = Objects.requireNonNull(gateway); refresh(); }
-    @FXML private void refresh() { run(() -> items.getItems().setAll(gateway.list())); }
-    @FXML private void create() { run(() -> { gateway.create(type.getValue(), name.getText(), description.getText()); reload(); }); }
-    @FXML private void update() { run(() -> { gateway.update(selected(), type.getValue(), name.getText(), description.getText()); reload(); }); }
-    @FXML private void delete() { run(() -> { gateway.delete(selected()); reload(); }); }
-    private UUID selected() {
-        ItemDetail item = items.getSelectionModel().getSelectedItem();
-        if (item == null) throw new IllegalArgumentException("Select an item first");
-        return item.id();
+    public void setGateway(Gateway gateway) {
+        this.gateway = Objects.requireNonNull(gateway);
+        refresh();
     }
-    private void reload() { items.getItems().setAll(gateway.list()); }
+
+    @FXML private void refresh() {
+        run(() -> { });
+    }
+
+    @FXML private void create() {
+        ItemType itemType = type.getValue();
+        String itemName = name.getText();
+        String itemDescription = description.getText();
+        run(() -> gateway.create(itemType, itemName, itemDescription));
+    }
+
+    @FXML private void update() {
+        ItemDetail item = items.getSelectionModel().getSelectedItem();
+        if (item == null) {
+            message.setText("Select an item first");
+            return;
+        }
+        ItemType itemType = type.getValue();
+        String itemName = name.getText();
+        String itemDescription = description.getText();
+        run(() -> gateway.update(item.id(), itemType, itemName, itemDescription));
+    }
+
+    @FXML private void delete() {
+        ItemDetail item = items.getSelectionModel().getSelectedItem();
+        if (item == null) {
+            message.setText("Select an item first");
+            return;
+        }
+        run(() -> gateway.delete(item.id()));
+    }
+
     private void run(Runnable action) {
-        if (gateway == null) { message.setText("Gateway not configured"); return; }
-        try { action.run(); message.setText("OK - in-memory prototype"); }
-        catch (IllegalArgumentException | IllegalStateException | SecurityException e) { message.setText(e.getMessage()); }
+        root.setDisable(true);
+        CompletableFuture.supplyAsync(() -> {
+            action.run();
+            return gateway.list();
+        }).whenComplete((result, error) -> Platform.runLater(() -> {
+            root.setDisable(false);
+            if (error == null) {
+                items.getItems().setAll(result);
+                message.setText("OK");
+            } else {
+                message.setText(error.getCause().getMessage());
+            }
+        }));
     }
 }
