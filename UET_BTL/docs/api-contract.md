@@ -365,3 +365,86 @@ tăng ném InvalidBidException (INVALID_BID). Phiên không RUNNING ném
 AuctionClosedException (AUCTION_CLOSED) trước khi kiểm tra giá, kể cả tại
 đúng end. Bid bị từ chối không đổi giá, không thêm history hay BID_ACCEPTED.
 Refresh tại end vẫn có thể phát AUCTION_FINISHED.
+
+## TV2 — scheduler tuần 9
+
+**Đã triển khai.** `vn.uet.auction.scheduler.AuctionScheduler` vẫn là functional
+interface với `List<StatusChange> tick()`. Lớp lồng `AuctionScheduler.Periodic`
+triển khai interface này và `AutoCloseable`.
+
+| API public | Hành vi |
+|---|---|
+| `Periodic(AuctionScheduler delegate, Duration interval)` | Nhận hàm tick và khoảng nghỉ dương biểu diễn được bằng nanosecond. Null gây `NullPointerException`, khoảng không dương gây `IllegalArgumentException`, tràn số gây `ArithmeticException`. |
+| `void start()` | Tick ngay trên luồng nền, sau đó nghỉ theo interval tính từ lúc tick trước kết thúc. Gọi lại khi đang chạy có cùng hiệu lực. Sau stop, ném `IllegalStateException`. |
+| `List<StatusChange> tick()` | Gọi delegate đồng bộ và trả kết quả trực tiếp. |
+| `void stop()`, `void close()` | Hủy các lượt tự động tiếp theo. Lượt đang chạy có thể hoàn tất. Có thể gọi lặp. |
+
+Lỗi `RuntimeException` từ tick nền được ghi log để các lượt sau tiếp tục.
+`closeDueAuctions()` tiếp tục lấy giờ từ `Clock` của service và phát Observer sau khi nhả lock.
+
+**Đề xuất tích hợp TV3.** Thành phần quản lý vòng đời server giữ một instance
+`new AuctionScheduler.Periodic(auctionService::closeDueAuctions, Duration.ofSeconds(1))`,
+gọi `start()` khi server sẵn sàng và `close()` khi shutdown. Nhóm cần thống nhất
+thành phần sở hữu instance và chu kỳ mặc định.
+
+**Đề xuất tích hợp TV1/TV4.** Chốt cách các service cùng đọc state đã commit
+sau khi `StateStore.save(ApplicationState) throws IOException` thành công, cùng
+lock với CRUD user/item. Cần thống nhất cách công bố snapshot mới, ánh xạ lỗi
+lưu trữ và nơi gọi `StateStore.load() throws IOException` khi khởi động.
+`AuctionManager` hiện khởi tạo state trong RAM, nên chưa có cam kết lưu bid qua restart.
+
+### Bàn giao tuần 9 để gửi TV3
+
+- Nối `CommandDispatcher(UserService, ItemService, ReentrantLock, AuctionService)` với một bộ
+  service dùng chung `ApplicationState` và `ReentrantLock`. Scheduler nhận
+  `auctionService::closeDueAuctions` từ chính bộ service này. Bản Socket hiện
+  cần điểm khởi động/shutdown trong `ServerMain` và `AuctionServer`. Đề xuất
+  một instance scheduler cho server, tick mỗi giây, đóng khi shutdown.
+- `AuctionController.configure(Supplier<CompletionStage<AuctionDetail>>,
+  Function<BigDecimal, CompletionStage<AuctionDetail>>)` đã có sẵn. Khi mở
+  chi tiết phiên, bind hai callback vào ID của phiên đang xem. Callback đầu
+  gọi `GET_AUCTION`, callback sau gửi `PLACE_BID` với ID và số tiền. Actor
+  lấy từ session phía server. Thực hiện I/O ngoài FX thread, hoàn tất stage
+  bằng `AuctionDetail` hoặc hoàn tất ngoại lệ khi response lỗi. Gọi
+  `dispose()` khi bỏ controller. Cần SDK thật vì `AuctionClient` hiện là
+  file khung. Các callback trên là API controller hiện có.
+- Kiểm tra đường đi login → list → chi tiết → bid qua Socket. Thử bid hợp lệ,
+  bid thấp và bid sau giờ đóng. Dispatcher hiện có `INVALID_BID` và
+  `AUCTION_CLOSED` cho hai tình huống sau. Kiểm tra thêm phiên tự đóng khi
+  client để yên, rồi truy vấn lại chi tiết để thấy trạng thái và người thắng.
+
+### Đề xuất giao dịch chung để TV2, TV4 và TV1 chốt
+
+1. Giữ hợp đồng `StateStore.load() throws IOException` và
+   `StateStore.save(ApplicationState) throws IOException`. TV4 hiện thực
+   `FileStateStore`; điểm khởi tạo gọi load một lần trước khi mở server.
+   File thiếu cho state rỗng, file hỏng báo lỗi và dừng khởi động.
+2. Đề xuất một lớp điều phối dùng chung, tên/chữ ký chờ duyệt:
+   `vn.uet.auction.persistence.StateTransactions(StateStore store) throws IOException`,
+   `<T> T read(Function<ApplicationState, T> operation)`,
+   `<T> T write(Function<ApplicationState, T> operation, Predicate<T> changed) throws IOException`.
+   Khi `changed` trả false, bỏ bản sao và trả kết quả, ví dụ tick có danh sách rỗng.
+   Coordinator sở hữu lock và state đã commit. Callback làm việc trong lock
+   và chỉ trả DTO/kết quả độc lập. Write sao chép state, áp dụng lệnh lên bản
+   sao, gọi save, rồi công bố bản sao. Mutation user/item cũng đi qua write.
+   Kiểm tra actor và quyền dùng state trong cùng giao dịch. TV1 cần duyệt
+   việc chuyển các service đang giữ reference trực tiếp sang coordinator.
+3. Chốt `Auction.history` là nguồn lịch sử chuẩn, `ApplicationState.bids` là
+   chỉ mục. Bid hợp lệ cập nhật cả hai trong bản sao. Xác nhận copy constructor
+   cô lập `Auction` và các kiểu dùng chung còn lại bất biến. Ghi lỗi thì giữ
+   state cũ và bỏ event. Event chỉ phát sau save thành công và nhả lock.
+4. Đề xuất lệnh bid bị từ chối không ghi snapshot. Nếu bid đến muộn, từ
+   chối theo `Clock` ngay trong lock, để scheduler đóng và lưu phiên ở lượt
+   kế tiếp. Đây là thay đổi cần duyệt vì hiện tại `placeBid` có thể chuyển
+   FINISHED và phát event trước khi trả `AuctionClosedException`. Tick không
+   đổi trạng thái nên bỏ qua save. Lỗi I/O đề xuất dùng `INTERNAL_ERROR`
+   hiện có ở dispatcher, log nguyên nhân phía server và cho tick sau thử lại.
+5. Tiêu chí bàn giao: tải lại được giá/history/winner sau restart; save lỗi
+   giữ nguyên cả giá, lịch sử, index và trạng thái trong RAM, không phát event;
+   bid đồng thời với tick không thêm bid muộn; CRUD thành công cũng được lưu.
+
+Hiện `AuctionService` giữ map auction/bid trực tiếp, `UserService` và
+`ItemService` giữ reference `ApplicationState`, còn `FileStateStore` là
+file khung. Việc chỉ thay reference trong `AuctionManager` sẽ để các service
+tiếp tục đọc reference cũ. Các chữ ký điều phối ở trên là đề xuất, chờ duyệt
+trước khi sửa constructor hoặc nối lưu trữ.

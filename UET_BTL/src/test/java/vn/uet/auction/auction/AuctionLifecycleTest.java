@@ -2,10 +2,13 @@ package vn.uet.auction.auction;
 
 import static org.junit.jupiter.api.Assertions.*;
 import java.math.BigDecimal;
+import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.UUID;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.locks.ReentrantLock;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -37,6 +40,30 @@ class AuctionLifecycleTest {
             assertFalse(lock.isHeldByCurrentThread(), "Callbacks must run after unlock");
             events.add(event);
         });
+    }
+
+    @Test
+    void periodicSchedulerFinishesAuctionWithoutClientRequest() throws InterruptedException {
+        clock.set(start);
+        service.placeBid(id, bidder, BigDecimal.TEN);
+        clock.set(start.plusSeconds(10));
+
+        var finished = new CountDownLatch(1);
+        service.addListener(event -> {
+            if (event.type() == AuctionEvent.Type.AUCTION_FINISHED) {
+                finished.countDown();
+            }
+        });
+        try (var scheduler = new AuctionScheduler.Periodic(
+                service::closeDueAuctions, Duration.ofMillis(10))) {
+            scheduler.start();
+            assertTrue(finished.await(5, TimeUnit.SECONDS), "Expected a background finish event");
+            var snapshot = service.getAuction(id).orElseThrow();
+            assertEquals(AuctionStatus.FINISHED, snapshot.status());
+            assertTrue(snapshot.winner().isPresent());
+            scheduler.stop();
+            assertThrows(IllegalStateException.class, scheduler::start);
+        }
     }
 
     @Test
