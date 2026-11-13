@@ -1,5 +1,7 @@
 package vn.uet.auction.service;
 
+import java.io.IOException;
+import java.io.UncheckedIOException;
 import java.math.BigDecimal;
 import java.time.Clock;
 import java.time.Instant;
@@ -12,6 +14,7 @@ import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.locks.ReentrantLock;
+import java.util.function.Predicate;
 import java.util.function.Supplier;
 import vn.uet.auction.exception.AuctionClosedException;
 import vn.uet.auction.exception.InvalidBidException;
@@ -60,8 +63,9 @@ public class AuctionService {
     private final List<AuctionEvent> pendingEvents = new ArrayList<>();
     private final Clock clock;
     private final ReentrantLock lock;
-    private final Map<UUID, Auction> auctions;
-    private final Map<UUID, Bid> bids;
+    private Map<UUID, Auction> auctions;
+    private Map<UUID, Bid> bids;
+    private StateTransactions transactions;
     private final UserService userService;
     private final ItemService itemService;
 
@@ -81,6 +85,13 @@ public class AuctionService {
         this(clock, lock, Objects.requireNonNull(state, "state").getAuctions(), state.getBids(),
                 Objects.requireNonNull(userService, "userService"),
                 Objects.requireNonNull(itemService, "itemService"));
+    }
+
+    /** Bind auction writes to the shared snapshot transaction. */
+    public AuctionService(Clock clock, StateTransactions transactions,
+                          UserService userService, ItemService itemService) {
+        this(clock, transactions.lock(), transactions.state(), userService, itemService);
+        this.transactions = transactions;
     }
 
     private AuctionService(Clock clock, ReentrantLock lock, Map<UUID, Auction> auctions,
@@ -107,7 +118,7 @@ public class AuctionService {
         Objects.requireNonNull(startingPrice, "startingPrice");
         Objects.requireNonNull(start, "start");
         Objects.requireNonNull(end, "end");
-        return inLock(() -> {
+        return inLock(() -> write(() -> {
             if (itemService != null) {
                 try {
                     itemService.requireOwnedItem(sellerId, itemId);
@@ -133,7 +144,7 @@ public class AuctionService {
             refresh(auction, now);
             auctions.put(auction.getId(), auction);
             return AuctionSnapshot.of(auction);
-        });
+        }, result -> true));
     }
 
     /** Chỉ đọc: không đổi trạng thái, nên có thể chậm hơn đồng hồ tới khi closeDueAuctions chạy. */
@@ -153,7 +164,7 @@ public class AuctionService {
      * Trả về danh sách thay đổi; rỗng nếu không có gì đổi. Gọi lại ngay lập tức là vô hại.
      */
     public List<StatusChange> closeDueAuctions() {
-        return inLock(() -> {
+        return inLock(() -> write(() -> {
             Instant now = clock.instant();
             List<StatusChange> changes = new ArrayList<>();
             for (Auction a : auctions.values()) {
@@ -163,7 +174,7 @@ public class AuctionService {
                 }
             }
             return List.copyOf(changes);
-        });
+        }, changes -> !changes.isEmpty()));
     }
 
     /**
@@ -177,12 +188,15 @@ public class AuctionService {
         Objects.requireNonNull(auctionId, "auctionId");
         Objects.requireNonNull(bidderId, "bidderId");
         Objects.requireNonNull(amount, "amount");
-        return inLock(() -> {
+        return inLock(() -> write(() -> {
             if (userService != null) {
                 userService.requireRole(bidderId, Role.BIDDER);
             }
             Auction auction = requireAuction(auctionId);
             Instant now = clock.instant();
+            if (transactions != null && !now.isBefore(auction.getEnd())) {
+                throw new AuctionClosedException("Phiên đã hết giờ nhận giá");
+            }
             refresh(auction, now);
             if (auction.getSellerId().equals(bidderId)) {
                 throw new Rejection(Rejection.Reason.FORBIDDEN, "Chủ phiên không được tự đặt giá");
@@ -201,7 +215,7 @@ public class AuctionService {
             bids.put(bid.getId(), bid);
             recordEvent(auction, auction.getStatus(), now, AuctionEvent.Type.BID_ACCEPTED);
             return AuctionSnapshot.of(auction);
-        });
+        }, result -> true));
     }
 
     public void addListener(AuctionListener listener) {
@@ -216,7 +230,7 @@ public class AuctionService {
     public AuctionSnapshot confirmPayment(UUID actorId, UUID auctionId) {
         Objects.requireNonNull(actorId, "actorId");
         Objects.requireNonNull(auctionId, "auctionId");
-        return inLock(() -> {
+        return inLock(() -> write(() -> {
             if (userService != null) {
                 userService.requireActive(actorId);
             }
@@ -232,14 +246,14 @@ public class AuctionService {
             auction.markPaid();
             recordEvent(auction, before, now, AuctionEvent.Type.PAYMENT_CONFIRMED);
             return AuctionSnapshot.of(auction);
-        });
+        }, result -> true));
     }
 
     /** Service tích hợp cho phép Admin active hoặc Seller active sở hữu phiên hủy. */
     public AuctionSnapshot cancelAuction(UUID actorId, UUID auctionId) {
         Objects.requireNonNull(actorId, "actorId");
         Objects.requireNonNull(auctionId, "auctionId");
-        return inLock(() -> {
+        return inLock(() -> write(() -> {
             Auction auction = requireAuction(auctionId);
             if (userService != null) {
                 Role role = userService.requireActive(actorId).role();
@@ -256,7 +270,7 @@ public class AuctionService {
             auction.cancel();
             recordEvent(auction, before, now, AuctionEvent.Type.AUCTION_CANCELED);
             return AuctionSnapshot.of(auction);
-        });
+        }, result -> true));
     }
 
     private static boolean isValidPrice(BigDecimal price) {
@@ -285,6 +299,33 @@ public class AuctionService {
     private void recordEvent(Auction auction, AuctionStatus before, Instant now, AuctionEvent.Type type) {
         pendingEvents.add(new AuctionEvent(auction.getId(), before, auction.getStatus(), now,
                 AuctionSnapshot.of(auction), type));
+    }
+
+    private <T> T write(Supplier<T> operation, Predicate<T> changed) {
+        if (transactions == null) {
+            return operation.get();
+        }
+        Map<UUID, Auction> committedAuctions = auctions;
+        Map<UUID, Bid> committedBids = bids;
+        boolean committed = false;
+        try {
+            T result = transactions.write(candidate -> {
+                auctions = candidate.getAuctions();
+                bids = candidate.getBids();
+                return operation.get();
+            }, changed);
+            committed = true;
+            return result;
+        } catch (IOException failure) {
+            LOGGER.log(System.Logger.Level.ERROR, "Auction snapshot save failed", failure);
+            throw new UncheckedIOException("Không thể lưu dữ liệu đấu giá", failure);
+        } finally {
+            auctions = committedAuctions;
+            bids = committedBids;
+            if (!committed) {
+                pendingEvents.clear();
+            }
+        }
     }
 
     private <T> T inLock(Supplier<T> body) {

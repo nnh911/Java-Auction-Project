@@ -1,5 +1,6 @@
 package vn.uet.auction.service;
 
+import java.io.IOException;
 import java.math.BigDecimal;
 import java.time.Clock;
 import java.time.Instant;
@@ -8,6 +9,7 @@ import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.locks.ReentrantLock;
 import vn.uet.auction.persistence.ApplicationState;
+import vn.uet.auction.persistence.StateStore;
 import vn.uet.auction.security.PasswordHasher;
 
 /**
@@ -25,16 +27,37 @@ public final class AuctionManager {
     }
 
     private final AuctionService service;
+    private final ReentrantLock lock;
 
     private final UserService userService;
     private final ItemService itemService;
 
     private AuctionManager() {
         ApplicationState state = new ApplicationState();
-        ReentrantLock lock = new ReentrantLock();
+        lock = new ReentrantLock();
         userService = new UserService(state, lock, new PasswordHasher());
         itemService = new ItemService(state, lock);
         service = new AuctionService(Clock.systemUTC(), lock, state, userService, itemService);
+    }
+
+    private AuctionManager(Clock clock, StateTransactions transactions) {
+        lock = transactions.lock();
+        userService = new UserService(transactions.state(), lock, new PasswordHasher());
+        itemService = new ItemService(transactions.state(), transactions.lock());
+        service = new AuctionService(clock, transactions, userService, itemService);
+    }
+
+    /** Load the server snapshot before accepting requests. */
+    public static AuctionManager open(StateStore store, Clock clock) throws IOException {
+        return new AuctionManager(clock, new StateTransactions(store));
+    }
+
+    public ReentrantLock getLock() {
+        return lock;
+    }
+
+    public AuctionService getAuctionService() {
+        return service;
     }
 
     public UserService getUserService() {

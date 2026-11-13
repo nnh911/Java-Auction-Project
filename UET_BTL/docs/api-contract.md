@@ -448,3 +448,36 @@ Hiện `AuctionService` giữ map auction/bid trực tiếp, `UserService` và
 file khung. Việc chỉ thay reference trong `AuctionManager` sẽ để các service
 tiếp tục đọc reference cũ. Các chữ ký điều phối ở trên là đề xuất, chờ duyệt
 trước khi sửa constructor hoặc nối lưu trữ.
+
+### TV2 tuần 9 — giao dịch đấu giá đã triển khai
+
+TV2 đã chốt phương án lưu trước khi công bố state. Phần tích hợp giữa các
+thành viên vẫn chờ ghép nhánh. Các chữ ký sau đã có trong package
+`vn.uet.auction.service`:
+
+- `static AuctionManager open(StateStore store, Clock clock) throws IOException`
+  tải snapshot trước khi tạo bộ service. Dùng một manager cho mỗi server.
+  Đường gọi `getInstance()` vẫn dùng chế độ RAM.
+- `AuctionService getAuctionService()` và `ReentrantLock getLock()` trên
+  `AuctionManager` cung cấp đúng instance và lock để TV3 truyền vào
+  `CommandDispatcher`. Scheduler dùng `manager::closeDueAuctions`.
+- `AuctionService(Clock clock, StateTransactions transactions, UserService
+  userService, ItemService itemService)` dùng coordinator chung.
+- `StateTransactions(StateStore store) throws IOException`,
+  `ReentrantLock lock()`, `<T> T read(Function<ApplicationState, T> operation)`
+  và `<T> T write(Function<ApplicationState, T> operation, Predicate<T> changed)
+  throws IOException`. Callback chạy dưới lock, chỉ trả kết quả độc lập và
+  không giữ reference đến state hay gọi write lồng nhau.
+
+Coordinator giữ identity của các map đang được service tham chiếu. Sau save,
+nội dung các map được cập nhật dưới lock. Lớp nằm trong package service để
+giữ phần điều phối trong phạm vi TV2. Các lệnh auction ghi chung snapshot;
+tick không đổi trạng thái bỏ qua save. Bid đến muộn ở chế độ lưu trữ bị từ
+chối và để scheduler đóng phiên. Lỗi ghi ném `UncheckedIOException`, được
+nhánh `RuntimeException` hiện có của dispatcher ánh xạ sang `INTERNAL_ERROR`.
+Observer chỉ nhận thay đổi sau khi save thành công và lock đã được nhả.
+
+TV1 cần chuyển các mutation user/item sang coordinator. Hiện chúng dùng
+chung state và lock nhưng chưa tự lưu khi đứng riêng. TV3 cần nối
+`AuctionManager.open(new FileStateStore(path), Clock.systemUTC())` vào vòng đời
+server sau khi ghép nhánh TV4. Không cần thay chữ ký command hay enum lỗi.
