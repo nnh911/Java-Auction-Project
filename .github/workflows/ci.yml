@@ -1,0 +1,29 @@
+name: Maven verify
+
+on: [push, pull_request]
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '25'
+          cache: maven
+          cache-dependency-path: UET_BTL/pom.xml
+      - name: Run tests and Checkstyle
+        run: mvn -B -ntp -f UET_BTL/pom.xml clean verify
+      - name: Upload test and coverage reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: maven-reports
+          path: |
+            UET_BTL/target/surefire-reports/
+            UET_BTL/target/site/jacoco/
+            UET_BTL/target/checkstyle-result.xml
